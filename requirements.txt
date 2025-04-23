@@ -1,0 +1,18 @@
+# Update these specific packages
+fastapi
+pydantic
+# Add any other dependencies that might need specific versions
+typing-extensions
+uvicorn
+requests
+python-dotenv
+python-multipart
+motor
+uuid
+psutil
+redis
+# Utilities
+PyYAML==6.0.1
+
+# Add dnspython to requirements.txt if not already present
+dnspython>=2.2.1

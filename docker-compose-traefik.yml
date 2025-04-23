@@ -1,0 +1,48 @@
+version: '3.8'
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.email=uditk2@gmail.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/ssl/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--providers.docker.network=traefik-public"
+      # WebSocket specific configurations
+      - "--accesslog=true"
+      - "--accesslog.fields.headers.names.X-Custom-Timeout=keep"
+      - "--serversTransport.forwardingTimeouts.dialTimeout=300s"
+      - "--serversTransport.forwardingTimeouts.idleConnTimeout=300s"
+      - "--serversTransport.forwardingTimeouts.responseHeaderTimeout=300s"
+      - "--providers.file.directory=/etc/traefik"  # Or "/etc/traefik/config" if using the directory approach
+      - "--providers.file.watch=true"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /home/azureuser/ssl:/ssl
+      - /home/azureuser/assets/traefik:/etc/traefik:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.apps.synergiqai.com`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      # Add default timeouts middleware
+      #- "traefik.http.middlewares.default-timeouts.headers.customResponseHeaders.X-Custom-Timeout=300"
+      #- "traefik.http.middlewares.default-timeouts.headers.customRequestHeaders.X-Custom-Timeout=300"
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true
