@@ -58,7 +58,7 @@ class TraefikLabeler:
             project_name: Project name for the deployment
             
         Returns:
-            Updated Docker Compose data with Traefik labels
+            Updated Docker Compose data with Traefik labels and a dict of service URLs
         """
         result = copy.deepcopy(compose_data)
         service_urls = {}
@@ -80,7 +80,7 @@ class TraefikLabeler:
             if "build" not in service_config and "image" not in service_config:
                 continue
                 
-            # Add Traefik labels only if the service has ports defined
+            # Process services that have ports defined
             if "ports" in service_config:
                 # Try to find the internal port
                 target_port = self._extract_port(service_config["ports"])
@@ -88,6 +88,17 @@ class TraefikLabeler:
                 # If we couldn't determine the port, skip this service
                 if not target_port:
                     continue
+                
+                # Convert ports to expose (internal only)
+                if "expose" not in service_config:
+                    service_config["expose"] = []
+                
+                # Add the target port to expose if not already there
+                if target_port not in service_config["expose"]:
+                    service_config["expose"].append(target_port)
+                
+                # Remove the external port mappings as Traefik will handle this
+                service_config.pop("ports", None)
                 
                 # Ensure the service has labels
                 if "labels" not in service_config:
@@ -116,7 +127,7 @@ class TraefikLabeler:
                     f"traefik.http.routers.{router_name}.tls.certresolver=letsencrypt",
                     f"traefik.http.services.{router_name}.loadbalancer.server.port={target_port}"
                 ]
-                service_urls[service_name] = service_domain
+                service_urls[service_name] = f"https://{service_domain}"
 
                 # Add labels that don't already exist
                 existing_labels = set(service_config["labels"])
