@@ -12,6 +12,7 @@ from app.docker.helper_functions import generate_unique_name
 from app.docker.utils import DockerUtils
 from app.docker.zip_utils import ZipUtils
 from app.docker.config import DockerConfig
+from app.docker.docker_log_handler import CommandResult
 from app.models.job import TriggeredJob
 from app.repositories.job_repository import JobRepository
 from app.controllers.workspace_controller import WorkspaceController
@@ -102,6 +103,9 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
         workspace = await WorkspaceController.get_workspace(username, workspace_name)
         # Build the Docker image
         command_result = DockerComposeUtils.run_docker_compose_down(workspace.workspace_path, username)
+        if command_result is None:
+            command_result = CommandResult(success=False, error="Command returned None result")
+            
         await JobRepository.update_job_status(
             job_id=job_id,
             status="running",
@@ -110,6 +114,9 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
             }
         )
         command_result = DockerComposeUtils.run_docker_compose_build(workspace.workspace_path, username)
+        if command_result is None:
+            command_result = CommandResult(success=False, error="Command returned None result")
+            
         await JobRepository.update_job_status(
             job_id=job_id,
             status="running",
@@ -119,6 +126,9 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
         )
         # Start the Docker container
         command_result = DockerComposeUtils.run_docker_compose_deploy(workspace.workspace_path, username)
+        if command_result is None:
+            command_result = CommandResult(success=False, error="Command returned None result")
+            
         await JobRepository.update_job_status(
             job_id=job_id,
             status="completed",

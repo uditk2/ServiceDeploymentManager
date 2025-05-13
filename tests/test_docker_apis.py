@@ -52,12 +52,13 @@ def assert_contains(container, item, message):
 
 
 #IP = "localhost"  # Change this to the IP address of your API server
-IP = "98.70.36.150"
+REMOTE = "https://apps.synergiqai.com"
+LOCAL = "http://localhost:8005"
 # Configuration
-API_BASE_URL = f"http://{IP}:8005"  # Change this to match your API server
+API_BASE_URL = REMOTE # Change this to match your API server
 DOCKER_API_URL = f"{API_BASE_URL}/api/docker"
 JOB_API_URL = f"{API_BASE_URL}/api/jobs"
-TEST_USERNAME = "test_user"
+TEST_USERNAME = "test_user_2"
 TEST_WORKSPACE = "test_workspace"
 
 def test_build_deploy_docker_image():
@@ -78,7 +79,7 @@ def test_build_deploy_docker_image():
             else:
                 print_info(f"Response: {response.status_code}")
                 print_info(f"Response content: {response.content.decode('utf-8')}")
-            wait_for_job_completion(response.json().get('job_id'))
+            return wait_for_job_completion(response.json().get('job_id'))
     except FileNotFoundError:
         print_failure(f"Test zip file not found: {zip_file_path}")
         return False
@@ -103,6 +104,8 @@ def wait_for_job_completion(job_id):
                 if job_status != 'pending' and job_status != 'running':
                     print_info(f"Job completed with status: {job_status}")
                     assert_equal(job_status, 'completed', "Job status should be completed")
+                    job_result = response.json().get('metadata').get('command_result').get('success')
+                    assert_equal(job_result, True, "Job result should be successful")
                     return True
                 else:
                     print_info(f"Job is still {job_status}. Waiting...")

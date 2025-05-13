@@ -76,22 +76,6 @@ class DockerUtils():
         }
 
     @staticmethod
-    def generate_traefik_labels(container_port, project_path, user_id):
-        """Generate Traefik labels for subdomain routing"""
-        project_name = Path(project_path).name
-        subdomain = DockerUtils.generate_subdomain(project_path=project_path, user_id=user_id)
-        network = DockerUtils.generate_network_labels()['network']
-        return {
-            'traefik.enable': 'true',
-            'traefik.docker.network': network,
-            f'traefik.http.routers.{project_name}.rule': f'Host(`{subdomain}`)',
-            f'traefik.http.routers.{project_name}.entrypoints': 'websecure',
-            f'traefik.http.routers.{project_name}.tls': 'true',
-            f'traefik.http.routers.{project_name}.tls.certresolver': 'letsencrypt',
-            f'traefik.http.services.{project_name}.loadbalancer.server.port': f'{container_port}'
-        }
-
-    @staticmethod
     def generate_subdomain(project_path, user_id):
         """Generate a unique subdomain for the project"""
         endpoint_file = os.path.join(project_path, 'endpoint')

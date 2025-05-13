@@ -3,6 +3,7 @@ import yaml
 import os
 import copy
 from typing import Dict, Any
+from app.custom_logging import logger
 
 class TraefikLabeler:
     """
@@ -36,7 +37,7 @@ class TraefikLabeler:
             compose_data = yaml.safe_load(f)
         
         # Apply Traefik configuration
-        updated_compose = self._process_compose_data(compose_data, project_name)
+        updated_compose, service_urls = self._process_compose_data(compose_data, project_name)
         
         # Generate output filename
         base_filename, ext = os.path.splitext(compose_file)
@@ -46,7 +47,7 @@ class TraefikLabeler:
         with open(output_file, 'w') as f:
             yaml.dump(updated_compose, f, default_flow_style=False, sort_keys=False)
         
-        return output_file
+        return output_file, service_urls
     
     def _process_compose_data(self, compose_data: Dict[str, Any], project_name: str) -> Dict[str, Any]:
         """
@@ -60,7 +61,7 @@ class TraefikLabeler:
             Updated Docker Compose data with Traefik labels
         """
         result = copy.deepcopy(compose_data)
-        
+        service_urls = {}
         # Ensure version is specified
         if "version" not in result:
             result["version"] = "3"
@@ -75,7 +76,11 @@ class TraefikLabeler:
         
         # Process each service
         for service_name, service_config in result.get("services", {}).items():
-            # Add Traefik labels to services with ports
+            # Skip services that don't have a build context (external images like Redis)
+            if "build" not in service_config and "image" not in service_config:
+                continue
+                
+            # Add Traefik labels only if the service has ports defined
             if "ports" in service_config:
                 # Try to find the internal port
                 target_port = self._extract_port(service_config["ports"])
@@ -97,18 +102,22 @@ class TraefikLabeler:
                 
                 # Create service specific domain
                 service_domain = f"{service_name}-{project_name}.{self.domain_base}"
-                
-                # Add Traefik labels
+                service_domain = service_domain.replace("_", "-").replace(" ", "-")
+                logger.info(f"Service domain: {service_domain}")
+                router_name = f"{service_name}-{project_name}".replace("_", "-").replace(" ", "-")
+                logger.info(f"Router domain: {router_name}")
+                # Add only essential Traefik labels
                 traefik_labels = [
                     "traefik.enable=true",
                     f"traefik.docker.network={self.network_name}",
-                    f"traefik.http.routers.{service_name}.rule=Host(`{service_domain}`)",
-                    f"traefik.http.routers.{service_name}.entrypoints=websecure",
-                    f"traefik.http.routers.{service_name}.tls=true",
-                    f"traefik.http.routers.{service_name}.tls.certresolver=letsencrypt",
-                    f"traefik.http.services.{service_name}.loadbalancer.server.port={target_port}"
+                    f"traefik.http.routers.{router_name}.rule=Host(`{service_domain}`)",
+                    f"traefik.http.routers.{router_name}.entrypoints=websecure",
+                    f"traefik.http.routers.{router_name}.tls=true",
+                    f"traefik.http.routers.{router_name}.tls.certresolver=letsencrypt",
+                    f"traefik.http.services.{router_name}.loadbalancer.server.port={target_port}"
                 ]
-                
+                service_urls[service_name] = service_domain
+
                 # Add labels that don't already exist
                 existing_labels = set(service_config["labels"])
                 for label in traefik_labels:
@@ -123,7 +132,7 @@ class TraefikLabeler:
                 elif isinstance(service_config["networks"], dict) and self.network_name not in service_config["networks"]:
                     service_config["networks"][self.network_name] = None
         
-        return result
+        return result, service_urls
     
     def _extract_port(self, ports_config):
         """Extract the internal port from ports configuration."""
@@ -144,5 +153,5 @@ class TraefikLabeler:
         
         # Default if we can't determine port
         return None
-    
- 
+
+

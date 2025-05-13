@@ -2,7 +2,7 @@ import os
 from .helper_functions import generate_unique_name
 from app.custom_logging import logger
 from .utils import DockerUtils
-from .docker_log_handler import DockerCommandWithLogHandler, ContainerLogHandler, CommandResult
+from .docker_log_handler import DockerCommandWithLogHandler, CommandResult
 import traceback
 import yaml
 from typing import Dict, Any, Optional
@@ -19,8 +19,9 @@ class DockerComposeUtils():
             cmd =  f'docker compose -p {container_name} down'
             return DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(cmd, container_name=container_name)
         except Exception as e:
-            logger.error(f"Error stopping container: {traceback.format_exc()}")
-            return None
+            error_msg = f"Error stopping container: {traceback.format_exc()}"
+            logger.error(error_msg)
+            return CommandResult(success=False, error=error_msg)
     
     @staticmethod
     def run_docker_compose_build(project_path, user_id)->CommandResult:
@@ -31,37 +32,11 @@ class DockerComposeUtils():
             cmd_handler = DockerCommandWithLogHandler(project_path)
             return cmd_handler.run_docker_commands_with_logging(cmd, container_name=container_name)
         except Exception as e:
-            logger.error(f"Error removing container: {traceback.format_exc()}")
-            return None
+            error_msg = f"Error building container: {traceback.format_exc()}"
+            logger.error(error_msg)
+            return CommandResult(success=False, error=error_msg)
 
     @staticmethod
-    def _get_exposed_port_docker_compose(project_path):
-        """Get the deployment port from the docker-compose file"""
-        try:
-            compose_file = os.path.join(project_path, 'docker-compose.yml')
-            if not os.path.exists(compose_file):
-                return None
-                
-            with open(compose_file, 'r') as f:
-                compose_config = yaml.safe_load(f)
-                
-            # Look for port mapping in the first service
-            services = compose_config.get('services', {})
-            if not services:
-                return None
-                
-            first_service = next(iter(services.values()))
-            ports = first_service.get('ports', [])
-
-            # Extract the expose port from the first port mapping
-            if ports and isinstance(ports[0], str):
-                return ports[0].split(':')[1]
-            elif ports and isinstance(ports[0], dict):
-                return ports[0].get('target')
-        except Exception as e:
-            logger.error(f"Error reading docker-compose.yml: {traceback.format_exc()}")
-            return None
-
     def _get_host_port_docker_compose(project_path):
         """Get the deployment port from the docker-compose file"""
         try:
@@ -77,57 +52,62 @@ class DockerComposeUtils():
             if not services:
                 return None
                 
-            first_service = next(iter(services.values()))
-            ports = first_service.get('ports', [])
+            all_ports = {}
             
-            # Extract the host port from the first port mapping
-            if ports and isinstance(ports[0], str):
-                return ports[0].split(':')[0]
-            elif ports and isinstance(ports[0], dict):
-                return ports[0].get('published')
-            return None
+            # Iterate through all services
+            for service_name, service_config in services.items():
+                ports = service_config.get('ports', [])
+                
+                # Extract all host ports
+                for port in ports:
+                    if isinstance(port, str):
+                        all_ports[service_name] = port.split(':')[0]
+                    elif isinstance(port, dict):
+                        published_port = port.get('published')
+                        if published_port:
+                            all_ports[service_name] = published_port
+            
+            return all_ports if all_ports else None
         except Exception as e:
             logger.error(f"Error reading docker-compose.yml: {traceback.format_exc()}")
             return None
 
-    def _dev_env_deploy(project_path, container_name, host_port, env_file_arg):
+    def _dev_env_deploy(project_path, container_name, host_ports, env_file_arg):
 
         cmd = f'docker compose {env_file_arg} -p {container_name} up -d --build'
         logger.info("Run command: " + cmd)
-        url = f"http://localhost:{host_port}"
+        service_urls = {}
+        for service_name, host_port in host_ports.items():
+            service_urls[service_name] = f"http://localhost:{host_port}"     
         try :
+            compose_file_name = DockerUtils.get_service_paths(project_path=project_path, only_compose=True)[0]
+            DockerComposeUtils.update_volume_paths(compose_file_path=os.path.join(project_path, compose_file_name), project_path=project_path)
             run_result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(cmd, container_name=container_name)
-            url = f"http://localhost:{host_port}"
             if run_result.success:
-              return run_result.set_deploy_info(json.dumps({"urls": [url], "container_name": container_name}))
+              run_result.set_deploy_info(json.dumps({"urls": service_urls, "container_name": container_name}))
+              return run_result
             return run_result
         except Exception as e:
             logger.error(f"Error in deploying in dev env {traceback.format_exc()}")
             return CommandResult(success=False, error=str(e), deploy_info=json.dumps({"urls": [], "error": {traceback.format_exc()}}))
         
-    def _prod_env_deploy(container_name, exposed_port, env_file_arg, project_path, user_id):
+    def _prod_env_deploy(container_name, env_file_arg, project_path):
         try:
             traefik_labeler = TraefikLabeler()
             compose_file_name = DockerUtils.get_service_paths(project_path=project_path, only_compose=True)[0]
-            network_compose_file =traefik_labeler.add_traefik_labels(compose_file=os.path.join(project_path, compose_file_name), project_name=container_name)
+            network_compose_file, service_urls =traefik_labeler.add_traefik_labels(compose_file=os.path.join(project_path, compose_file_name), project_name=container_name)
+            # Update volume paths in the compose file
+            DockerComposeUtils.update_volume_paths(compose_file_path=network_compose_file, project_path=project_path)
             generate_deploy_command = DockerComposeUtils.generate_deploy_command(compose_file=network_compose_file, project_name=container_name, env_file_arg=env_file_arg)
-            logger.info("Run command: " + generate_deploy_command)
-            urls = DockerComposeUtils.get_service_urls(compose_file=network_compose_file, container_name=container_name)
+            logger.info("Run command: " + generate_deploy_command)        
             run_result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(generate_deploy_command, container_name=container_name)
-            # Check if the network compose file exists and remove it if it does
-            if os.path.exists(network_compose_file):
-                logger.info(f"Removing temporary compose file: {network_compose_file}")
-                try:
-                    os.remove(network_compose_file)
-                except Exception as e:
-                    logger.warning(f"Could not remove temporary compose file: {str(e)}")
             if run_result.success:
-               run_result.set_deploy_info(json.dumps({"urls": urls, "container_name": container_name}))
+               run_result.set_deploy_info(json.dumps({"urls": service_urls, "container_name": container_name}))
                return run_result
             return run_result
         except Exception as e:
             logger.error(f"Error in deploying in prod env {traceback.format_exc()}")
-            return CommandResult(success=False, error=str(e), deploy_info=json.dumps({"urls": [], "error": {traceback.format_exc()}}))
+            return CommandResult(success=False, error=str(e), deploy_info=json.dumps({"urls": [], "error": traceback.format_exc()}))
         
     @staticmethod
     def run_docker_compose_deploy(project_path, user_id, env_file_path=None):
@@ -135,16 +115,19 @@ class DockerComposeUtils():
         env_file_arg = ""
         if env_file_path is not None:
             env_file_arg = f"--env-file {env_file_path}"
-        exposed_port = DockerComposeUtils._get_exposed_port_docker_compose(project_path=project_path)
-        host_port = DockerComposeUtils._get_host_port_docker_compose(project_path=project_path)
+        host_ports = DockerComposeUtils._get_host_port_docker_compose(project_path=project_path)
+        
+        # Default to a placeholder port if none is found
+        if host_ports is None:
+             raise ValueError("No host ports found in the docker-compose file.")
 
         if os.getenv('FLASK_ENV') == 'development':
             return DockerComposeUtils._dev_env_deploy(project_path=project_path, container_name=container_name, 
-                                                      host_port=host_port, env_file_arg=env_file_arg)
+                                                      host_ports=host_ports, env_file_arg=env_file_arg)
         else:
             return DockerComposeUtils._prod_env_deploy(container_name=container_name, 
-                                                       exposed_port=exposed_port, env_file_arg=env_file_arg, 
-                                                       project_path=project_path, user_id=user_id)
+                                                        env_file_arg=env_file_arg, 
+                                                       project_path=project_path)
     
                 
 
@@ -204,3 +187,82 @@ class DockerComposeUtils():
             urls[service_name] = url
         
         return urls
+    
+    @staticmethod
+    def update_volume_paths(compose_file_path: str, project_path: str) -> None:
+        """
+        Update volume paths in a docker-compose file by prepending mapped project path
+        to the left-hand side of volume mappings.
+        
+        Args:
+            compose_file_path: Path to the docker-compose.yml file
+            project_path: Base project path to be mapped
+        
+        Returns:
+            None
+        """
+        try:
+            # Read the compose file
+            with open(compose_file_path, 'r') as f:
+                compose_data = yaml.safe_load(f)
+            
+            mapped_path = DockerComposeUtils.get_mapped_project_path(project_path)
+            
+            # Process each service's volumes
+            services = compose_data.get('services', {})
+            for service_name, service_config in services.items():
+                if 'volumes' in service_config:
+                    updated_volumes = []
+                    for volume in service_config['volumes']:
+                        # Handle string format "source:target"
+                        if isinstance(volume, str) and ':' in volume:
+                            source, target = volume.split(':', 1)
+                            # Handle relative paths (including those starting with ./)
+                            if not source.startswith('/') and not source.startswith('~'):
+                                # Remove leading ./ if present
+                                if source.startswith('./'):
+                                    source = source[2:]
+                                # It's a relative path, prepend with mapped project path
+                                source = os.path.join(mapped_path, source)
+                            updated_volumes.append(f"{source}:{target}")
+                        # Handle object format {source: ..., target: ...}
+                        elif isinstance(volume, dict) and 'source' in volume:
+                            if not volume['source'].startswith('/') and not volume['source'].startswith('~'):
+                                # Remove leading ./ if present and also handle ~
+                                if volume['source'].startswith('./') or volume['source'].startswith('~/'):
+                                    volume['source'] = volume['source'][2:]
+                                volume['source'] = os.path.join(mapped_path, volume['source'])
+                            updated_volumes.append(volume)
+                        else:
+                            updated_volumes.append(volume)
+                    
+                    service_config['volumes'] = updated_volumes
+            
+            # Write the updated compose file
+            with open(compose_file_path, 'w') as f:
+                yaml.dump(compose_data, f, default_flow_style=False)
+                
+            logger.info(f"Updated volume paths in {compose_file_path}")
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error updating volume paths: {traceback.format_exc()}")
+            return False
+
+    @staticmethod
+    def get_mapped_project_path(project_path: str) -> str:
+        """
+        Replace the local project path with the appropriate volume path if needed.
+        
+        Args:
+            project_path: Original project path
+            
+        Returns:
+            Mapped project path for use in Docker volumes
+        """
+        volume_map = dict([os.environ.get('BASE_VOLUME_DIR_MAP', '').split(':', 1)])
+            
+        for base_path, volume_path in volume_map.items():
+            if project_path.startswith(base_path):
+                return project_path.replace(base_path, volume_path, 1)
+        return project_path

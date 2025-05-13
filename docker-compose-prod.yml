@@ -4,8 +4,7 @@ services:
   deployment-manager:
     build: .
     container_name: deployment-manager
-    ports:
-      - "8005:8005"
+    # Removed ports mapping to prevent direct host:port access
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/azureuser/service/logs:/app/logs
@@ -17,6 +16,7 @@ services:
       - WORKSPACE_BASE_DIR=/app/workspaces
       - LOGS_DIR=/app/logs
       - DOCKER_BASE_DIR=/app/docker/deployments
+      - BASE_VOLUME_DIR_MAP=/app/docker/deployments:/home/azureuser/deployments
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
@@ -24,8 +24,16 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.deployment-manager.rule=Host(`apps.synergiqai.com`)"
+      - "traefik.http.routers.deployment-manager.entrypoints=websecure"
+      - "traefik.http.routers.deployment-manager.tls=true"
+      - "traefik.http.routers.deployment-manager.tls.certresolver=letsencrypt"
+      - "traefik.http.services.deployment-manager.loadbalancer.server.port=8005"
     networks:
       - backend-network
+      - traefik-public
   
   redis:
     image: redis:alpine

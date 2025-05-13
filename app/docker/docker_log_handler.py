@@ -1,4 +1,3 @@
-
 import json
 import psutil
 import time
@@ -84,7 +83,7 @@ class DockerCommandWithLogHandler:
 
             if stderr and not success:
                 logger.error(f"Command failed: {stderr}")
-                return CommandResult(success=False, error=stderr)
+                return CommandResult(success=False, output=stdout, error=stderr)
 
             if stdout and retain_logs:
                 logger.info(f"Command output logged to {log_file}")

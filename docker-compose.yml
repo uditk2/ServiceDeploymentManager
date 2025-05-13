@@ -17,6 +17,7 @@ services:
       - WORKSPACE_BASE_DIR=/app/workspaces
       - LOGS_DIR=/app/logs
       - DOCKER_BASE_DIR=/app/docker/deployments
+      - BASE_VOLUME_DIR_MAP=/app/docker/deployments:/Users/uditkhandelwal/Documents/testing
       - DATABASE=deployment_manager_test
     restart: unless-stopped
     healthcheck:

@@ -2,7 +2,6 @@ from typing import List, Dict, Optional
 from app.models.workspace import UserWorkspace
 from app.repositories.workspace_repository import WorkspaceRepository
 from app.docker.zip_utils import ZipUtils
-from app.docker.dockerfile_utils import DockerFileUtils
 from app.docker.docker_compose_utils import DockerComposeUtils
 import os
 import tempfile
@@ -70,16 +69,8 @@ class WorkspaceController:
                     project_path=workspace.workspace_path,
                     user_id=username
                 )
-                if not result or not result.success:
-                    # Fallback to regular docker stop/remove
-                    DockerFileUtils.run_docker_stop(
-                        project_path=workspace.workspace_path,
-                        user_id=username
-                    )
-                    DockerFileUtils.run_docker_remove(
-                        project_path=workspace.workspace_path,
-                        user_id=username
-                    )
+                if not result["success"]:
+                    raise Exception(result["message"])
             except Exception as e:
                 logger.error(f"Error cleaning up containers: {str(e)}")
 
