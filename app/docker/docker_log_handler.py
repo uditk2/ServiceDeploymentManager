@@ -96,184 +96,226 @@ class DockerCommandWithLogHandler:
             return CommandResult(success=False, error=error_msg)
 
 
-class ContainerLogHandler:
-    def __init__(self, logs_path):
-        self.redis_store = redis_store
-        self.process_key_prefix = "container_logger:process:"
-        self.hostname = "synergiqai"
-        self.stop_event = Event()  # For graceful shutdown
-        self.processes = {}  # Track processes by container name
-        # Start cleaner as thread
-        self.cleaner_thread = self.start_cleaner()
-        self.project_logs_path = logs_path
-
-    def start_cleaner(self):
-        """Start the cleaner thread"""
-        thread = Thread(target=self._run_cleanup_service, daemon=True)
-        thread.start()
-        return thread
-
-    def setup_container_logging(self, container_name, retain_logs=False):
-        try:
-            log_dir = os.path.join(self.project_logs_path, container_name)
+class DockerLogHandler:
+    def __init__(self, log_file_path):
+        """
+        Initialize a handler that captures command output to a log file
+        
+        Args:
+            log_file_path (str): Path to the log file
+        """
+        self.log_file_path = log_file_path
+        log_dir = os.path.dirname(log_file_path)
+        if not os.path.exists(log_dir):
             os.makedirs(log_dir, exist_ok=True)
+            
+        # Create or truncate the log file
+        with open(log_file_path, 'w') as f:
+            f.write(f"=== Log started at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
 
-            log_file = os.path.join(log_dir, 'service.log')
-            # Remove any existing log with the same name
+    def run_command_with_logging(self, command: str) -> CommandResult:
+        """
+        Run a command and log the output to a file
+        
+        Args:
+            command (str): Command to execute
+            
+        Returns:
+            CommandResult: Result of the command execution
+        """
+        try:
+            logger.info(f"Running command with logging: {command}")
+            
+            # Set up the logging handler with rotation
+            handler = RotatingFileHandler(
+                self.log_file_path,
+                maxBytes=1024*1024,  # 1MB
+                backupCount=5,
+                mode='a'  # Append mode
+            )
+            
+            # Add timestamp to the log
+            with open(self.log_file_path, 'a') as f:
+                f.write(f"\n=== Command executed at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+                f.write(f"Command: {command}\n\n")
+            
+            # Run the command and stream output to the log file
+            with open(self.log_file_path, 'a') as log_file:
+                process = subprocess.Popen(
+                    shlex.split(command),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
+                    bufsize=1  # Line buffered
+                )
+                
+                stdout, stderr = process.communicate()
+                success = process.returncode == 0
+                
+                # Write output and errors to the log file
+                if stdout:
+                    log_file.write(f"Output:\n{stdout}\n")
+                if stderr:
+                    log_file.write(f"Errors:\n{stderr}\n")
+                log_file.write(f"Status: {'Success' if success else 'Failed'}\n")
+                log_file.write("-" * 80 + "\n")
+            
+            if not success:
+                logger.error(f"Command failed: {stderr}")
+                return CommandResult(success=False, output=stdout, error=stderr)
+            
+            return CommandResult(success=True, output=stdout)
+            
+        except Exception as e:
+            error_msg = f"Error executing command {command}: {traceback.format_exc()}"
+            logger.error(error_msg)
+            
+            # Try to log the error to the file
+            try:
+                with open(self.log_file_path, 'a') as f:
+                    f.write(f"ERROR: {error_msg}\n")
+                    f.write("-" * 80 + "\n")
+            except:
+                pass
+                
+            return CommandResult(success=False, error=error_msg)
+
+
+class DockerComposeLogHandler:
+    """Handles consolidated logging from all containers in a Docker Compose project"""
+    
+    def __init__(self, logs_path):
+        """
+        Initialize the Docker Compose Log Handler
+        
+        Args:
+            logs_path (str): Base directory for logs
+        """
+        self.project_logs_path = logs_path
+        self.processes = {}  # Store processes by project name
+        self.stop_event = Event()
+    
+    def follow_compose_logs(self, compose_file, project_name, retain_logs=False):
+        """
+        Follow logs from all containers in a Docker Compose setup and write to a single log file.
+        This is similar to running 'docker compose logs -f' but outputs to a file.
+        
+        Args:
+            compose_file (str): Path to the docker-compose.yml file
+            project_name (str): Docker Compose project name
+            retain_logs (bool): Whether to retain existing logs (default: False)
+            
+        Returns:
+            bool: True if logging was set up successfully, False otherwise
+        """
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(self.project_logs_path, exist_ok=True)
+            
+            # Set up a single log file for all containers in this compose project
+            log_file = os.path.join(self.project_logs_path, f'{project_name}-compose.log')
+            
+            # Remove existing log if not retaining
             if os.path.exists(log_file) and not retain_logs:
                 os.remove(log_file)
+                
             handler = RotatingFileHandler(
                 log_file,
-                maxBytes=500*1024,
+                maxBytes=1024*1024,  # 1MB
                 backupCount=5
             )
-
-            # Check if container exists and is running
-            container_status = os.popen(f'docker inspect --format="{{{{.State.Status}}}}" {container_name}').read().strip()
-            if container_status != "running":
-                logger.error(f"Container {container_name} is not running, status: {container_status}")
-                return False
-
-            # Create a process to capture logs
+            
+            # Command to follow all logs from the Docker Compose project
+            cmd = f"docker compose -f {compose_file} -p {project_name} logs -f --timestamps"
+            
+            logger.info(f"Starting Docker Compose logs for project {project_name}")
+            
+            # Create a process to capture logs from all containers
             process = subprocess.Popen(
-                ['docker', 'logs', '-f', container_name],
+                shlex.split(cmd),
                 stdout=handler.stream,
                 stderr=subprocess.STDOUT,
                 close_fds=True
             )
-
-            # Monitor container status in a separate thread
+            
+            # Start a monitoring thread for this process
             monitor_thread = Thread(
-                target=self._monitor_container,
-                args=(container_name, process.pid),
+                target=self._monitor_compose_project,
+                args=(project_name, compose_file, process.pid),
                 daemon=True
             )
             monitor_thread.start()
-
-            logger.info(f"Started logging process with {process.pid}")
-            process_info = {
+            
+            # Store process info
+            self.processes[project_name] = {
                 'pid': process.pid,
-                'container_name': container_name,
-                'start_time': time.time(),
-                'host': self.hostname,
-                'status': 'running'
+                'compose_file': compose_file,
+                'project_name': project_name,
+                'monitor_thread': monitor_thread,
+                'log_file': log_file,
+                'start_time': time.time()
             }
-
-            # Store in local dict for tracking
-            self.processes[container_name] = {
-                'process_info': process_info,
-                'monitor_thread': monitor_thread
-            }
-
-            redis_key = f"{self.process_key_prefix}{self.hostname}:{container_name}"
-
-            # Store process info in Redis
-            self.redis_store.set_value(redis_key, json.dumps(process_info))
-
-            logger.info(f"Container logs being written to {log_file} on host {self.hostname}")
+            
+            logger.info(f"Docker Compose logs for project {project_name} being written to {log_file}")
             return True
-
+            
         except Exception as e:
-            logger.error(f"Error setting up container logging: {traceback.format_exc()}")
+            logger.error(f"Error setting up Docker Compose logging: {traceback.format_exc()}")
             return False
-
-    def _monitor_container(self, container_name, log_pid):
-        """Monitor container status and cleanup logging if container stops"""
-        redis_key = f"{self.process_key_prefix}{self.hostname}:{container_name}"
-
-        while not self.stop_event.is_set():
-            try:
-                status = os.popen(f'docker inspect --format="{{{{.State.Status}}}}" {container_name}').read().strip()
-                if status not in ["running", "created"]:
-                    logger.warning(f"Container {container_name} is not running (status: {status}), stopping logging")
-                    self._cleanup_process(redis_key)
-                    break
-                time.sleep(10)
-            except Exception as e:
-                logger.error(f"Error monitoring container {container_name}: {str(e)}")
-                break
-
-    def _run_cleanup_service(self):
-        """Thread service to cleanup zombie processes"""
-        while not self.stop_event.is_set():
-            try:
-                pattern = f"{self.process_key_prefix}{self.hostname}:*"
-                process_keys = self.redis_store.get_keys_by_pattern(pattern)
-
-                for key in process_keys:
-                    if self.stop_event.is_set():
-                        break
-
-                    process_info_str = self.redis_store.get_value(key)
-                    if not process_info_str:
-                        continue
-
-                    process_info = json.loads(process_info_str)
-
-                    try:
-                        logger.info(f"Checking process {json.dumps(process_info)}")
-                        pid = int(process_info['pid'])
-                        process = psutil.Process(pid)
-
-                        if process.status() == psutil.STATUS_ZOMBIE or \
-                           time.time() - float(process_info['start_time']) > 7200:
-                            self._cleanup_process(key)
-
-                    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
-                        self.redis_store.delete_key(key)
-
-            except Exception as e:
-                logger.error(f"Error in cleanup service: {traceback.format_exc()}")
-
-            # Use standard time.sleep instead of gevent.sleep
-            time.sleep(300)
-
-    def shutdown(self):
-        """Graceful shutdown method"""
-        logger.info("Initiating container log handler shutdown")
-        self.stop_event.set()
-
-        # Cleanup all processes for this host
-        pattern = f"{self.process_key_prefix}{self.hostname}:*"
-        process_keys = self.redis_store.get_keys_by_pattern(pattern)
-
-        for key in process_keys:
-            self._cleanup_process(key)
-
-        # Wait for cleaner thread to finish
-        if self.cleaner_thread.is_alive():
-            self.cleaner_thread.join(timeout=10)
-
-    def _cleanup_process(self, redis_key):
-        """Internal method to cleanup a process and its Redis entry
-
+    
+    def _monitor_compose_project(self, project_name, compose_file, log_pid):
+        """
+        Monitor Docker Compose project and cleanup logging when project stops
+        
         Args:
-            redis_key (str): Redis key for the process info
-
-        Returns:
-            bool: True if cleanup successful, False otherwise
+            project_name (str): Docker Compose project name
+            compose_file (str): Path to the compose file
+            log_pid (int): PID of the logging process
+        """
+        while not self.stop_event.is_set():
+            try:
+                # Check if the Docker Compose project is still running
+                # This command lists running containers in the project
+                cmd = f"docker compose -f {compose_file} -p {project_name} ps --services --filter status=running"
+                result = subprocess.run(shlex.split(cmd), capture_output=True, text=True)
+                
+                running_services = result.stdout.strip().split('\n')
+                running_services = [s for s in running_services if s]  # Remove empty strings
+                
+                if not running_services:
+                    logger.warning(f"No running containers found for project {project_name}, stopping logging")
+                    self._cleanup_process(project_name)
+                    break
+                    
+                # Check at intervals
+                time.sleep(30)
+                
+            except Exception as e:
+                logger.error(f"Error monitoring Docker Compose project {project_name}: {str(e)}")
+                break
+    
+    def _cleanup_process(self, project_name):
+        """
+        Cleanup a logging process for a Docker Compose project
+        
+        Args:
+            project_name (str): Name of the Docker Compose project
         """
         try:
-            # Get process info from Redis
-            process_info_str = self.redis_store.get_value(redis_key)
-            if not process_info_str:
+            if project_name not in self.processes:
                 return False
-
-            process_info = json.loads(process_info_str)
-
-            # Only cleanup processes on this host
-            if process_info['host'] != self.hostname:
-                return False
-
+                
+            process_info = self.processes[project_name]
+            
             try:
                 # Attempt to terminate the process
-                logger.info(f"Cleaning up process {json.dumps(process_info)}")
-                pid = int(process_info['pid'])
+                logger.info(f"Cleaning up logging process for Docker Compose project {project_name}")
+                pid = process_info['pid']
                 process = psutil.Process(pid)
                 
                 # Send SIGTERM
                 process.terminate()
-
+                
                 # Wait for process to terminate
                 try:
                     process.wait(timeout=5)
@@ -281,23 +323,27 @@ class ContainerLogHandler:
                     # If SIGTERM didn't work, force kill
                     process.kill()
                     process.wait(timeout=2)
-
-                logger.info(f"Cleaned up process {pid} for container {process_info['container_name']}")
-
-                # Clean up from our local tracking dict
-                container_name = process_info['container_name']
-                if container_name in self.processes:
-                    del self.processes[container_name]
-
+                
+                logger.info(f"Cleaned up logging process {pid} for Docker Compose project {project_name}")
+                
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 # Process already gone or can't access it
                 logger.debug(f"Process {process_info['pid']} already gone")
-
+                
             finally:
-                # Always clean up Redis entry
-                self.redis_store.delete_key(redis_key)
+                # Clean up from our tracking dict
+                del self.processes[project_name]
                 return True
-
+                
         except Exception as e:
-            logger.error(f"Error cleaning up process: {traceback.format_exc()}")
+            logger.error(f"Error cleaning up process for Docker Compose project {project_name}: {traceback.format_exc()}")
             return False
+    
+    def shutdown(self):
+        """Graceful shutdown of all logging processes"""
+        logger.info("Initiating Docker Compose log handler shutdown")
+        self.stop_event.set()
+        
+        # Clean up all processes
+        for project_name in list(self.processes.keys()):
+            self._cleanup_process(project_name)

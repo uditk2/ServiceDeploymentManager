@@ -55,17 +55,17 @@ def assert_contains(container, item, message):
 REMOTE = "https://apps.synergiqai.com"
 LOCAL = "http://localhost:8005"
 # Configuration
-API_BASE_URL = REMOTE # Change this to match your API server
+API_BASE_URL = LOCAL # Change this to match your API server
 DOCKER_API_URL = f"{API_BASE_URL}/api/docker"
 JOB_API_URL = f"{API_BASE_URL}/api/jobs"
-TEST_USERNAME = "test_user_2"
+TEST_USERNAME = "test_user"
 TEST_WORKSPACE = "test_workspace"
 
 def test_build_deploy_docker_image():
     """Build a Docker image for the project."""
     url = f"{DOCKER_API_URL}/build_deploy/{TEST_USERNAME}/{TEST_WORKSPACE}"
     print_test_header("Building and deploying Docker image")
-    zip_file_path = "./tests/PythonWebApplication.zip"
+    zip_file_path = "./tests/SampleWebApp.zip"
     
     try:
         with open(zip_file_path, 'rb') as f:
@@ -103,10 +103,10 @@ def wait_for_job_completion(job_id):
                 job_status = response.json().get('status')
                 if job_status != 'pending' and job_status != 'running':
                     print_info(f"Job completed with status: {job_status}")
-                    assert_equal(job_status, 'completed', "Job status should be completed")
+                    assertion = assert_equal(job_status, 'completed', "Job status should be completed")
                     job_result = response.json().get('metadata').get('command_result').get('success')
-                    assert_equal(job_result, True, "Job result should be successful")
-                    return True
+                    assertion = assertion and assert_equal(job_result, True, "Job result should be successful")
+                    return assertion
                 else:
                     print_info(f"Job is still {job_status}. Waiting...")
             time.sleep(5)  # Wait for 5 seconds before checking again

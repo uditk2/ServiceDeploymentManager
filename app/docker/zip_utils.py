@@ -97,9 +97,12 @@ class ZipUtils:
         Returns:
             dict: Result of the operation with success status and message
         """
+        destination_path = None
+        if base_directory is None:
+            destination_path = DockerConfig.get_project_dir(user_name, project_name)
+        else:
+            destination_path = os.path.join(base_directory, user_name, project_name)
             
-        destination_path = DockerConfig.get_project_dir(user_name, project_name)
-        
         try:
             logger.info(f"Creating destination directory: {destination_path}")
             

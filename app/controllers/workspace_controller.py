@@ -130,7 +130,14 @@ class WorkspaceController:
                 )
                 await WorkspaceRepository.create_workspace(new_workspace)
                 logger.info(f"Created new workspace: {username}/{workspace_name}")
-            
+            else:
+                # Update existing workspace path
+                await WorkspaceRepository.update_workspace(
+                    username=username,
+                    workspace_name=workspace_name,
+                    update_data={"workspace_path": result["project_path"]}
+                )
+                logger.info(f"Updated existing workspace: {username}/{workspace_name}")
             return {
                 "status": "success",
                 "message": "Workspace uploaded and extracted successfully",

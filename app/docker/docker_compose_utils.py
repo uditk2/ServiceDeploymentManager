@@ -2,7 +2,7 @@ import os
 from .helper_functions import generate_unique_name
 from app.custom_logging import logger
 from .utils import DockerUtils
-from .docker_log_handler import DockerCommandWithLogHandler, CommandResult
+from .docker_log_handler import DockerCommandWithLogHandler, CommandResult, DockerComposeLogHandler
 import traceback
 import yaml
 from typing import Dict, Any, Optional
@@ -81,11 +81,22 @@ class DockerComposeUtils():
             service_urls[service_name] = f"http://localhost:{host_port}"     
         try :
             compose_file_name = DockerUtils.get_service_paths(project_path=project_path, only_compose=True)[0]
-            DockerComposeUtils.update_volume_paths(compose_file_path=os.path.join(project_path, compose_file_name), project_path=project_path)
+            compose_file_path = os.path.join(project_path, compose_file_name)
+            DockerComposeUtils.update_volume_paths(compose_file_path=compose_file_path, project_path=project_path)
+            
+            # Run the docker compose command
             run_result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(cmd, container_name=container_name)
-            if run_result.success:
-              run_result.set_deploy_info(json.dumps({"urls": service_urls, "container_name": container_name}))
-              return run_result
+            
+            if run_result.success:                
+                # Set up consolidated logging for all containers in the project
+                docker_compose_logger = DockerComposeLogHandler(project_path)
+                docker_compose_logger.follow_compose_logs(
+                    compose_file=compose_file_path,
+                    project_name=container_name
+                )
+                
+                run_result.set_deploy_info(json.dumps({"urls": service_urls, "container_name": container_name}))
+                return run_result
             return run_result
         except Exception as e:
             logger.error(f"Error in deploying in dev env {traceback.format_exc()}")
@@ -95,15 +106,26 @@ class DockerComposeUtils():
         try:
             traefik_labeler = TraefikLabeler()
             compose_file_name = DockerUtils.get_service_paths(project_path=project_path, only_compose=True)[0]
-            network_compose_file, service_urls =traefik_labeler.add_traefik_labels(compose_file=os.path.join(project_path, compose_file_name), project_name=container_name)
+            compose_file_path = os.path.join(project_path, compose_file_name)
+            network_compose_file, service_urls = traefik_labeler.add_traefik_labels(compose_file=compose_file_path, project_name=container_name)
             # Update volume paths in the compose file
             DockerComposeUtils.update_volume_paths(compose_file_path=network_compose_file, project_path=project_path)
             generate_deploy_command = DockerComposeUtils.generate_deploy_command(compose_file=network_compose_file, project_name=container_name, env_file_arg=env_file_arg)
-            logger.info("Run command: " + generate_deploy_command)        
+            logger.info("Run command: " + generate_deploy_command)
+            
+            # Run the docker compose command      
             run_result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(generate_deploy_command, container_name=container_name)
+            
             if run_result.success:
-               run_result.set_deploy_info(json.dumps({"urls": service_urls, "container_name": container_name}))
-               return run_result
+                # Set up consolidated logging for all containers in the project
+                docker_compose_logger = DockerComposeLogHandler(project_path)
+                docker_compose_logger.follow_compose_logs(
+                    compose_file=network_compose_file,
+                    project_name=container_name
+                )
+                
+                run_result.set_deploy_info(json.dumps({"urls": service_urls, "container_name": container_name}))
+                return run_result
             return run_result
         except Exception as e:
             logger.error(f"Error in deploying in prod env {traceback.format_exc()}")
