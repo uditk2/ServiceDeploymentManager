@@ -283,8 +283,9 @@ class DockerComposeLogHandler:
                 running_services = [s for s in running_services if s]  # Remove empty strings
                 
                 if not running_services:
-                    logger.warning(f"No running containers found for project {project_name}, stopping logging")
-                    self._cleanup_process(project_name)
+                    logger.warning(f"No running containers found for project {project_name}")
+                    ## We need the logs for debugging, so we don't stop the logging process here
+                    ## self._cleanup_process(project_name)
                     break
                     
                 # Check at intervals
