@@ -1,5 +1,5 @@
 from pathlib import Path
-
+import os
 
 def extract_user_id(user_id):
     """Extract user ID from email"""
@@ -24,3 +24,11 @@ def generate_collection_name(project_base_path=None, user_id=None):
 def get_container_name(project_base_path=None, user_id=None):
     """Get container name using project and user ID"""
     return generate_unique_name(project_base_path=project_base_path, user_id=user_id)
+
+def get_log_file_path_user_workspace(project_base_path=None, user_id: str=None) -> str:
+    project_name = get_container_name(project_base_path=project_base_path, user_id=user_id)
+    return get_log_file_path(project_base_path=project_base_path, project_name=project_name)
+
+def get_log_file_path(project_base_path=None, project_name: str=None) -> str:
+    log_file = os.path.join(project_base_path, f'{project_name}-compose.log')
+    return log_file

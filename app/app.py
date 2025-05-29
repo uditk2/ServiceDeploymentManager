@@ -1,6 +1,5 @@
-import subprocess
-import os
-from fastapi import FastAPI, HTTPException, Depends
+
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 from dotenv import load_dotenv
@@ -9,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import routes
-from app.routes import general, docker, workspaces, jobs
+from app.routes import general, docker, workspaces, jobs, logs
 
 # Import models and repositories
 from app.models.workspace import UserWorkspace
@@ -29,3 +28,4 @@ app.include_router(general.router)
 app.include_router(docker.router)
 app.include_router(workspaces.router)
 app.include_router(jobs.router)
+app.include_router(logs.router)

@@ -9,7 +9,7 @@ import subprocess
 from app.transient_store.redis_store import redis_store
 from threading import Event, Thread
 from app.custom_logging import logger
-
+from .helper_functions import get_log_file_path
 
 class CommandResult:
     def __init__(self, success: bool, output: str = None, error: str = None, deploy_info: str = None):
@@ -213,7 +213,7 @@ class DockerComposeLogHandler:
             os.makedirs(self.project_logs_path, exist_ok=True)
             
             # Set up a single log file for all containers in this compose project
-            log_file = os.path.join(self.project_logs_path, f'{project_name}-compose.log')
+            log_file = get_log_file_path(project_base_path=self.project_logs_path, project_name=project_name)
             
             # Remove existing log if not retaining
             if os.path.exists(log_file) and not retain_logs:
