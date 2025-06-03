@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from typing import List, Optional
@@ -8,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import routes
-from app.routes import general, docker, workspaces, jobs, logs
+from app.routes import general, docker, workspaces, jobs, logs, stats
 
 # Import models and repositories
 from app.models.workspace import UserWorkspace
@@ -29,3 +28,4 @@ app.include_router(docker.router)
 app.include_router(workspaces.router)
 app.include_router(jobs.router)
 app.include_router(logs.router)
+app.include_router(stats.router)

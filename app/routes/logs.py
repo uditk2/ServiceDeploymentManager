@@ -1,22 +1,24 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Path
 from typing import List, Optional
 import os
-from pathlib import Path
+from pathlib import Path as PathLib
 from datetime import datetime
+from urllib.parse import unquote
 
 from app.log_parser.python_log_parser import DockerLogParser
 from app.controllers.workspace_controller import WorkspaceController
 from app.docker.helper_functions import get_log_file_path_user_workspace
+
 router = APIRouter(
     prefix="/api/logs",
     tags=["logs"]
 )
 
 
-@router.get("/{username}/{workspace_name}")
+@router.get("/{username:path}/{workspace_name}")
 async def get_workspace_logs(
-    username: str, 
-    workspace_name: str,
+    username: str = Path(..., description="The username (can be an email address)"), 
+    workspace_name: str = Path(..., description="The workspace name"),
     minutes: Optional[int] = Query(30, description="Get logs from last X minutes"),
     lines: Optional[int] = Query(50, description="Number of log lines to return"),
     service: Optional[str] = None,
@@ -39,6 +41,9 @@ async def get_workspace_logs(
         A list of log entries with timestamps
     """
     try:
+        # URL decode the username to handle email addresses properly
+        username = unquote(username)
+        
         log_file_path = await _get_log_file_path(username, workspace_name)
         if not os.path.exists(log_file_path):
             return {"message": "No logs found for this workspace", "logs": []}
@@ -64,7 +69,7 @@ async def get_workspace_logs(
         
         return {
             "workspace": workspace_name,
-            "username": username,
+            "username": username,  # Return the decoded username
             "log_count": len(formatted_logs),
             "logs": formatted_logs
         }
@@ -76,10 +81,10 @@ async def get_workspace_logs(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving logs: {str(e)}")
 
-@router.get("/{username}/{workspace_name}/services")
+@router.get("/{username:path}/{workspace_name}/services")
 async def get_workspace_log_services(
-    username: str,
-    workspace_name: str
+    username: str = Path(..., description="The username (can be an email address)"),
+    workspace_name: str = Path(..., description="The workspace name")
 ):
     """
     Get a list of services that have logs for the specified workspace.
@@ -92,6 +97,9 @@ async def get_workspace_log_services(
         A list of service names
     """
     try:
+        # URL decode the username to handle email addresses properly
+        username = unquote(username)
+        
         # Determine the log file path
         log_file_path = await _get_log_file_path(username, workspace_name)
 
@@ -117,10 +125,10 @@ async def get_workspace_log_services(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving service names: {str(e)}")
 
-@router.get("/{username}/{workspace_name}/tail")
+@router.get("/{username:path}/{workspace_name}/tail")
 async def tail_workspace_logs(
-    username: str, 
-    workspace_name: str,
+    username: str = Path(..., description="The username (can be an email address)"), 
+    workspace_name: str = Path(..., description="The workspace name"),
     lines: int = Query(50, description="Number of log lines to return"),
     service: Optional[str] = None
 ):
@@ -136,7 +144,10 @@ async def tail_workspace_logs(
     Returns:
         The latest log lines
     """
-    try:            
+    try:
+        # URL decode the username to handle email addresses properly
+        username = unquote(username)
+                   
         # Get the log file path
         log_file_path = await _get_log_file_path(username, workspace_name)
         
@@ -160,7 +171,7 @@ async def tail_workspace_logs(
                 
         return {
             "workspace": workspace_name, 
-            "username": username,
+            "username": username,  # Return the decoded username
             "log_count": len(tail_lines),
             "logs": tail_lines
         }
@@ -170,17 +181,27 @@ async def tail_workspace_logs(
 
 
 async def _get_log_file_path(username: str, workspace_name: str) -> str:
-            # First, verify the workspace exists
-        workspace = None
-        try:
-            workspace = await WorkspaceController.get_workspace(username, workspace_name)
-        except ValueError:
-            raise HTTPException(status_code=404, detail=f"Workspace '{workspace_name}' not found for user '{username}'")
-        
-        project_base_path = workspace.workspace_path
-        # Determine the log file path
+    # First, verify the workspace exists
+    try:
+        workspace = await WorkspaceController.get_workspace(username, workspace_name)
+    except ValueError as e:
+        # Workspace not found - return proper 404 error
+        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_name}' not found for user '{username}'")
+    except Exception as e:
+        # Other unexpected errors
+        raise HTTPException(status_code=500, detail=f"Error retrieving workspace: {str(e)}")
+    
+    if not workspace:
+        # Extra safety check in case get_workspace returns None instead of raising ValueError
+        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_name}' not found for user '{username}'")
+    
+    project_base_path = workspace.workspace_path
+    
+    # Determine the log file path
+    try:
         log_file_path = get_log_file_path_user_workspace(project_base_path=project_base_path, user_id=username)
         if not log_file_path:
             raise HTTPException(status_code=404, detail="Log file not found for this workspace")
         return log_file_path
-        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error determining log file path: {str(e)}")
