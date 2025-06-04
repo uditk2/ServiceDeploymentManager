@@ -76,6 +76,40 @@ class DockerLogParser:
         until_dt = datetime.fromisoformat(until.replace('Z', ''))
         return self._get_logs_by_timerange(since_dt, until_dt, service_filter, tail_lines)
     
+    def get_logs_by_tail(self, num_lines: int, service_filter: Optional[str] = None) -> List[Tuple[datetime, str]]:
+        """Get the last N lines from the log file, optionally filtered by service."""
+        matching_logs = []
+        
+        try:
+            with open(self.log_file, 'r', encoding='utf-8', errors='ignore') as file:
+                # Get the last N lines efficiently
+                tail_lines = self._tail_file(file, num_lines)
+                
+                for line in tail_lines:
+                    line = line.strip()
+                    
+                    if not line:
+                        continue
+                    
+                    # Apply service filter
+                    if service_filter:
+                        service_name = self.extract_service_name(line)
+                        if not service_name or service_filter.lower() not in service_name.lower():
+                            continue
+                    
+                    # Try to extract timestamp, use current time if not found
+                    timestamp = self.extract_timestamp(line)
+                    if not timestamp:
+                        timestamp = datetime.now()
+                        
+                    matching_logs.append((timestamp, line))
+                    
+        except Exception as e:
+            print(f"Error reading log file: {e}", file=sys.stderr)
+            return []
+        
+        return matching_logs
+
     def _get_logs_by_timerange(self, start_time: datetime, end_time: datetime,
                               service_filter: Optional[str] = None,
                               tail_lines: int = None) -> List[Tuple[datetime, str]]:

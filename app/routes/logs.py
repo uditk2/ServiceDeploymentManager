@@ -8,6 +8,7 @@ from urllib.parse import unquote
 from app.log_parser.python_log_parser import DockerLogParser
 from app.controllers.workspace_controller import WorkspaceController
 from app.docker.helper_functions import get_log_file_path_user_workspace
+from app.custom_logging import logger
 
 router = APIRouter(
     prefix="/api/logs",
@@ -19,7 +20,7 @@ router = APIRouter(
 async def get_workspace_logs(
     username: str = Path(..., description="The username (can be an email address)"), 
     workspace_name: str = Path(..., description="The workspace name"),
-    minutes: Optional[int] = Query(30, description="Get logs from last X minutes"),
+    minutes: Optional[int] = Query(None, description="Get logs from last X minutes"),
     lines: Optional[int] = Query(50, description="Number of log lines to return"),
     service: Optional[str] = None,
     since: Optional[str] = None,
@@ -31,7 +32,7 @@ async def get_workspace_logs(
     Args:
         username: The username of the workspace owner
         workspace_name: The name of the workspace
-        minutes: Get logs from the last X minutes (default: 30)
+        minutes: Get logs from the last X minutes (optional)
         lines: Maximum number of log lines to return (default: 50)
         service: Filter logs by service name
         since: Start time in ISO format (e.g., '2025-05-26T14:30:00')
@@ -55,9 +56,12 @@ async def get_workspace_logs(
         if since and until:
             # Get logs by time range
             logs = log_parser.get_logs_by_timerange(since, until, service, lines)
-        else:
+        elif minutes is not None:
             # Get logs by minutes
             logs = log_parser.get_logs_by_minutes(minutes, service, lines)
+        else:
+            # Just tail the file when no time parameters are specified
+            logs = log_parser.get_logs_by_tail(lines or 50, service)
         
         # Format the logs for the response
         formatted_logs = [
@@ -200,6 +204,7 @@ async def _get_log_file_path(username: str, workspace_name: str) -> str:
     # Determine the log file path
     try:
         log_file_path = get_log_file_path_user_workspace(project_base_path=project_base_path, user_id=username)
+        logger.info(f"Log file path for workspace '{workspace_name}' of user '{username}': {log_file_path}")
         if not log_file_path:
             raise HTTPException(status_code=404, detail="Log file not found for this workspace")
         return log_file_path
