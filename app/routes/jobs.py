@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import List, Optional
 from app.models.job import TriggeredJob
 from app.repositories.job_repository import JobRepository
+from app.controllers.workspace_controller import WorkspaceController
 
 router = APIRouter(
     prefix="/api/jobs",
@@ -38,8 +39,17 @@ async def list_user_jobs(username: str):
 async def list_workspace_jobs(username: str, workspace_name: str):
     """List all jobs for a specific workspace"""
     try:
-        jobs = await JobRepository.list_jobs_by_workspace(username, workspace_name)
+        # First, verify the workspace exists and get the actual workspace name
+        workspace = await WorkspaceController.get_workspace(username, workspace_name)
+        if not workspace:
+            raise HTTPException(status_code=404, 
+                               detail=f"Workspace '{workspace_name}' not found for user '{username}'")
+        
+        # Use the actual workspace name from database for job lookup
+        jobs = await JobRepository.list_jobs_by_workspace(username, workspace.workspace_name)
         return jobs
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list workspace jobs: {str(e)}")
 

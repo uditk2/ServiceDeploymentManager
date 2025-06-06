@@ -45,7 +45,7 @@ async def get_workspace_logs(
         # URL decode the username to handle email addresses properly
         username = unquote(username)
         
-        log_file_path = await _get_log_file_path(username, workspace_name)
+        log_file_path, actual_workspace_name = await _get_log_file_path(username, workspace_name)
         if not os.path.exists(log_file_path):
             return {"message": "No logs found for this workspace", "logs": []}
         
@@ -72,7 +72,7 @@ async def get_workspace_logs(
         ]
         
         return {
-            "workspace": workspace_name,
+            "workspace": actual_workspace_name,
             "username": username,  # Return the decoded username
             "log_count": len(formatted_logs),
             "logs": formatted_logs
@@ -105,7 +105,7 @@ async def get_workspace_log_services(
         username = unquote(username)
         
         # Determine the log file path
-        log_file_path = await _get_log_file_path(username, workspace_name)
+        log_file_path, actual_workspace_name = await _get_log_file_path(username, workspace_name)
 
         
         if not os.path.exists(log_file_path):
@@ -153,7 +153,7 @@ async def tail_workspace_logs(
         username = unquote(username)
                    
         # Get the log file path
-        log_file_path = await _get_log_file_path(username, workspace_name)
+        log_file_path, actual_workspace_name = await _get_log_file_path(username, workspace_name)
         
         if not os.path.exists(log_file_path):
             return {"message": "No logs found for this workspace", "logs": []}
@@ -174,7 +174,7 @@ async def tail_workspace_logs(
             tail_lines = filtered_lines
                 
         return {
-            "workspace": workspace_name, 
+            "workspace": actual_workspace_name, 
             "username": username,  # Return the decoded username
             "log_count": len(tail_lines),
             "logs": tail_lines
@@ -184,8 +184,8 @@ async def tail_workspace_logs(
         raise HTTPException(status_code=500, detail=f"Error tailing logs: {str(e)}")
 
 
-async def _get_log_file_path(username: str, workspace_name: str) -> str:
-    # First, verify the workspace exists
+async def _get_log_file_path(username: str, workspace_name: str) -> tuple[str, str]:
+    # First, verify the workspace exists using case-insensitive matching
     try:
         workspace = await WorkspaceController.get_workspace(username, workspace_name)
     except ValueError as e:
@@ -200,13 +200,14 @@ async def _get_log_file_path(username: str, workspace_name: str) -> str:
         raise HTTPException(status_code=404, detail=f"Workspace '{workspace_name}' not found for user '{username}'")
     
     project_base_path = workspace.workspace_path
+    actual_workspace_name = workspace.workspace_name  # Use the actual workspace name from database
     
     # Determine the log file path
     try:
         log_file_path = get_log_file_path_user_workspace(project_base_path=project_base_path, user_id=username)
-        logger.info(f"Log file path for workspace '{workspace_name}' of user '{username}': {log_file_path}")
+        logger.info(f"Log file path for workspace '{actual_workspace_name}' of user '{username}': {log_file_path}")
         if not log_file_path:
             raise HTTPException(status_code=404, detail="Log file not found for this workspace")
-        return log_file_path
+        return log_file_path, actual_workspace_name
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error determining log file path: {str(e)}")

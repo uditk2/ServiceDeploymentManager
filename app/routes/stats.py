@@ -28,10 +28,10 @@ async def get_docker_stats(username: str, workspace_name: str) -> Dict:
             raise HTTPException(status_code=404, 
                                detail=f"Workspace '{workspace_name}' not found for user '{username}'")
         
-        # Get the workspace path and retrieve stats
+        # Get the workspace path and retrieve stats using the actual workspace name
         stats = DockerStats.get_workspace_stack_stats(
             username=username,
-            workspace_name=workspace_name,
+            workspace_name=workspace.workspace_name,  # Use actual workspace name from database
             workspace_path=workspace.workspace_path
         )
         
@@ -40,10 +40,10 @@ async def get_docker_stats(username: str, workspace_name: str) -> Dict:
             raise HTTPException(status_code=500, 
                                detail=f"Failed to get Docker stats: {stats['error']}")
         
-        # Return the stats
+        # Return the stats using the actual workspace name
         return {
             "username": username,
-            "workspace_name": workspace_name,
+            "workspace_name": workspace.workspace_name,  # Use actual workspace name from database
             "stats": stats
         }
         

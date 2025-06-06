@@ -36,11 +36,15 @@ async def build_deploy_job(
             workspace_name=workspace_name,
             workspace_path=DockerConfig.get_project_dir(username, workspace_name)
         )
-        user_workspace  = await WorkspaceController.create_workspace(workspace)
+        user_workspace = await WorkspaceController.create_workspace(workspace)
+    
+    # Use the actual workspace name from the database for job creation
+    actual_workspace_name = user_workspace.workspace_name if user_workspace else workspace_name
+    
     job = TriggeredJob(
         job_id= str(uuid.uuid4()),
         username=username,
-        workspace_name=workspace_name,
+        workspace_name=actual_workspace_name,  # Use actual workspace name
         status="pending",
         job_type="build_deploy"
     )
@@ -55,10 +59,10 @@ async def build_deploy_job(
             # Save the uploaded file to the temporary file
             shutil.copyfileobj(zip_file.file, temp_file)
             
-        # Create background task with the temp file path
+        # Create background task with the temp file path using actual workspace name
         asyncio.create_task(run_build_deploy_job(
             username=username,
-            workspace_name=workspace_name,
+            workspace_name=actual_workspace_name,  # Use actual workspace name
             job_id=job_id,
             temp_file_path=temp_file_path
         ))

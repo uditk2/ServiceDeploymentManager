@@ -2,6 +2,7 @@ from typing import List, Optional, Dict
 from app.database import user_workspace_collection
 from app.models.workspace import UserWorkspace
 from datetime import datetime
+import re
 
 class WorkspaceRepository:
     """Repository for managing user workspace data in MongoDB"""
@@ -13,10 +14,10 @@ class WorkspaceRepository:
         # Ensure the deployed versions are in reverse chronological order
         workspace_dict["deployed_versions"] = workspace_dict.get("deployed_versions", [])
         
-        # Check if workspace already exists
+        # Check if workspace already exists (case-insensitive)
         existing = await user_workspace_collection.find_one({
             "username": workspace.username,
-            "workspace_name": workspace.workspace_name
+            "workspace_name": {"$regex": f"^{re.escape(workspace.workspace_name)}$", "$options": "i"}
         })
         
         if existing:
@@ -27,10 +28,10 @@ class WorkspaceRepository:
     
     @staticmethod
     async def get_workspace(username: str, workspace_name: str) -> Optional[UserWorkspace]:
-        """Get a workspace by username and workspace name"""
+        """Get a workspace by username and workspace name (case-insensitive for workspace name)"""
         workspace_dict = await user_workspace_collection.find_one({
             "username": username,
-            "workspace_name": workspace_name
+            "workspace_name": {"$regex": f"^{re.escape(workspace_name)}$", "$options": "i"}
         })
         
         if workspace_dict:
@@ -58,7 +59,10 @@ class WorkspaceRepository:
         update_data["updated_at"] = datetime.now()
         
         result = await user_workspace_collection.update_one(
-            {"username": username, "workspace_name": workspace_name},
+            {
+                "username": username, 
+                "workspace_name": {"$regex": f"^{re.escape(workspace_name)}$", "$options": "i"}
+            },
             {"$set": update_data}
         )
         
@@ -68,7 +72,10 @@ class WorkspaceRepository:
     async def add_deployed_version(username: str, workspace_name: str, version: str) -> bool:
         """Add a new deployed version to the beginning of the list (reverse chronological order)"""
         result = await user_workspace_collection.update_one(
-            {"username": username, "workspace_name": workspace_name},
+            {
+                "username": username, 
+                "workspace_name": {"$regex": f"^{re.escape(workspace_name)}$", "$options": "i"}
+            },
             {
                 "$push": {"deployed_versions": {"$each": [version], "$position": 0}},
                 "$set": {"updated_at": datetime.utcnow()}
@@ -82,7 +89,7 @@ class WorkspaceRepository:
         """Delete a workspace"""
         result = await user_workspace_collection.delete_one({
             "username": username,
-            "workspace_name": workspace_name
+            "workspace_name": {"$regex": f"^{re.escape(workspace_name)}$", "$options": "i"}
         })
         
         return result.deleted_count > 0
