@@ -8,10 +8,10 @@ on application startup. Deployment-time log watching is handled by follow_compos
 import os
 import subprocess
 import shlex
+import asyncio
 from typing import Optional, Dict, List
 from app.custom_logging import logger
 from app.docker.docker_log_handler import DockerComposeLogHandler
-from app.docker.config import DockerConfig
 from app.models.workspace import UserWorkspace
 
 
@@ -21,6 +21,8 @@ class LogWatcherManager:
     def __init__(self):
         self._log_handler: Optional[DockerComposeLogHandler] = None
         self._initialized = False
+        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_interval = 3600  # 1 hour in seconds
     
     @property
     def log_handler(self) -> Optional[DockerComposeLogHandler]:
@@ -48,8 +50,12 @@ class LogWatcherManager:
             # Discover and resurrect log watchers for running workspaces
             resurrected_count = await self._resurrect_log_watchers()
             
+            # Start periodic cleanup task
+            self._start_periodic_cleanup()
+            
             self._initialized = True
             logger.info(f"Log watcher resurrection completed. Resurrected {resurrected_count} log watchers.")
+            logger.info(f"Started periodic cleanup task (interval: {self._cleanup_interval}s)")
             return True
             
         except Exception as e:
@@ -58,21 +64,137 @@ class LogWatcherManager:
             return False
     
     async def shutdown(self) -> None:
-        """Gracefully shutdown all log watchers"""
+        """Gracefully shutdown all log watchers and cleanup tasks"""
         if not self._initialized:
             return
             
         try:
-            if self._log_handler:
-                logger.info("Shutting down log watchers...")
-                self._log_handler.shutdown()
-                logger.info("Log watchers shutdown completed")
+            # Stop periodic cleanup task
+            if self._cleanup_task and not self._cleanup_task.done():
+                logger.info("Stopping periodic cleanup task...")
+                self._cleanup_task.cancel()
+                try:
+                    await self._cleanup_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # The actual log watchers are cleaned up by individual DockerComposeLogHandler instances
+            # during deployment and workspace deletion, so we don't need to do anything here
+            
+            logger.info("Log watcher manager shutdown completed")
         except Exception as e:
-            logger.error(f"Error during log watcher shutdown: {str(e)}")
+            logger.error(f"Error during log watcher manager shutdown: {str(e)}")
         finally:
             self._log_handler = None
             self._initialized = False
     
+    def _start_periodic_cleanup(self):
+        """Start the periodic cleanup background task"""
+        self._cleanup_task = asyncio.create_task(self._periodic_cleanup_loop())
+    
+    async def _periodic_cleanup_loop(self):
+        """Background task that runs periodic cleanup"""
+        try:
+            while True:
+                await asyncio.sleep(self._cleanup_interval)
+                await self._run_periodic_cleanup()
+        except asyncio.CancelledError:
+            logger.info("Periodic cleanup task cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in periodic cleanup loop: {str(e)}")
+    
+    async def _run_periodic_cleanup(self):
+        """Run a single cleanup cycle to detect and clean orphaned log watchers"""
+        try:
+            logger.info("Running periodic log watcher cleanup...")
+            
+            orphaned_count = 0
+            total_watchers = 0
+            
+            # Get all workspaces from database
+            from app.database import user_workspace_collection
+            async for workspace_dict in user_workspace_collection.find({}):
+                workspace = UserWorkspace(**workspace_dict)
+                
+                # Check if this workspace has log watchers that should be cleaned up
+                cleaned = await self._cleanup_orphaned_watcher(workspace)
+                if cleaned:
+                    orphaned_count += 1
+                total_watchers += 1
+            
+            if orphaned_count > 0:
+                logger.info(f"Periodic cleanup completed: cleaned {orphaned_count}/{total_watchers} orphaned log watchers")
+            else:
+                logger.debug(f"Periodic cleanup completed: no orphaned watchers found ({total_watchers} workspaces checked)")
+                
+        except Exception as e:
+            logger.error(f"Error during periodic cleanup: {str(e)}")
+    
+    async def _cleanup_orphaned_watcher(self, workspace: UserWorkspace) -> bool:
+        """
+        Check if a workspace has orphaned log watchers and clean them up
+        
+        Args:
+            workspace: The workspace to check
+            
+        Returns:
+            bool: True if an orphaned watcher was cleaned up, False otherwise
+        """
+        username = workspace.username
+        workspace_name = workspace.workspace_name
+        workspace_path = workspace.workspace_path
+        
+        try:
+            # Check if workspace has a docker-compose file
+            compose_file = os.path.join(workspace_path, "docker-compose.yml")
+            if not os.path.exists(compose_file):
+                return False
+            
+            # Generate project name using the same logic as deployment
+            project_name = self._generate_project_name(username, workspace_name)
+            
+            # Check if containers are still running for this workspace
+            running_services = await self._get_running_services(compose_file, project_name)
+            
+            # If no containers are running, but log files exist, clean them up
+            if not running_services:
+                # Check if there are log files that might indicate orphaned watchers
+                log_file_pattern = f"{project_name}-compose.log"
+                potential_log_files = []
+                
+                # Look for log files in the workspace directory
+                if os.path.exists(workspace_path):
+                    for file in os.listdir(workspace_path):
+                        if file.endswith('-compose.log') and project_name in file:
+                            potential_log_files.append(os.path.join(workspace_path, file))
+                
+                # Also check for position files (indicates active watchers)
+                position_files = []
+                for log_file in potential_log_files:
+                    position_file = f"{log_file}.position"
+                    if os.path.exists(position_file):
+                        position_files.append(position_file)
+                
+                if position_files:
+                    logger.info(f"Found orphaned log watcher artifacts for {username}/{workspace_name} (no running containers)")
+                    
+                    # Clean up position files (this indicates the watcher was active but containers stopped)
+                    for position_file in position_files:
+                        try:
+                            os.remove(position_file)
+                            logger.debug(f"Removed orphaned position file: {position_file}")
+                        except OSError as e:
+                            logger.warning(f"Could not remove position file {position_file}: {e}")
+                    
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error checking workspace {username}/{workspace_name} for orphaned watchers: {str(e)}")
+            return False
+
     async def _resurrect_log_watchers(self) -> int:
         """
         Discover and resurrect log watchers for running Docker Compose stacks
