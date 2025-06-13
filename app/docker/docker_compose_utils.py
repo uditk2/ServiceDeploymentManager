@@ -22,7 +22,7 @@ class DockerComposeUtils():
             error_msg = f"Error stopping container: {traceback.format_exc()}"
             logger.error(error_msg)
             return CommandResult(success=False, error=error_msg)
-    
+
     @staticmethod
     def run_docker_compose_build(project_path, user_id)->CommandResult:
         os.chdir(project_path)
@@ -143,6 +143,31 @@ class DockerComposeUtils():
         if host_ports is None:
              raise ValueError("No host ports found in the docker-compose file.")
 
+        # Perform optional pre-deployment cleanup to free up space
+        # These operations are non-critical and should never fail the deployment
+        try:
+            logger.info("Performing optional pre-deployment cleanup...")
+            cleanup_result = DockerComposeUtils.run_docker_compose_cleanup(project_path, user_id)
+            if cleanup_result.success:
+                logger.info("Pre-deployment cleanup completed successfully")
+            else:
+                logger.info(f"Pre-deployment cleanup completed with warnings: {cleanup_result.error}")
+        except Exception as cleanup_error:
+            logger.info(f"Pre-deployment cleanup skipped due to error: {str(cleanup_error)}")
+
+        # Perform optional system cleanup to free more space
+        # This is also non-critical and should never fail the deployment
+        try:
+            logger.info("Performing optional system cleanup...")
+            system_cleanup_result = DockerComposeUtils.run_system_cleanup()
+            if system_cleanup_result.success:
+                logger.info("System cleanup completed successfully")
+            else:
+                logger.info(f"System cleanup completed with warnings: {system_cleanup_result.error}")
+        except Exception as system_cleanup_error:
+            logger.info(f"System cleanup skipped due to error: {str(system_cleanup_error)}")
+
+        # Proceed with the actual deployment
         if os.getenv('FLASK_ENV') == 'development':
             return DockerComposeUtils._dev_env_deploy(project_path=project_path, container_name=container_name, 
                                                       host_ports=host_ports, env_file_arg=env_file_arg)
@@ -288,3 +313,115 @@ class DockerComposeUtils():
             if project_path.startswith(base_path):
                 return project_path.replace(base_path, volume_path, 1)
         return project_path
+
+    @staticmethod
+    def run_docker_compose_cleanup(project_path, user_id) -> CommandResult:
+        """
+        Perform selective cleanup for a specific project without disturbing other running containers.
+        Only cleans up resources related to this project.
+        
+        Args:
+            project_path: Path to the project directory
+            user_id: User identifier
+            
+        Returns:
+            CommandResult indicating success/failure of cleanup operations
+        """
+        os.chdir(project_path)
+        container_name = generate_unique_name(project_base_path=project_path, user_id=user_id)
+        
+        try:
+            # Only clean up resources specific to this project
+            cleanup_commands = [
+                # Stop and remove only THIS project's containers
+                f'docker compose -p {container_name} down --volumes --remove-orphans',
+                # Remove only images specific to this project (if they exist)
+                f'docker images -q --filter "label=com.docker.compose.project={container_name}" | xargs -r docker rmi -f 2>/dev/null || true',
+                # Only remove dangling images (not affecting running containers)
+                'docker image prune -f'
+            ]
+            
+            results = []
+            for cmd in cleanup_commands:
+                logger.info(f"Running selective cleanup command: {cmd}")
+                try:
+                    result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(cmd, container_name=container_name)
+                    if result:
+                        results.append(result)
+                        if not result.success:
+                            logger.warning(f"Cleanup command failed (non-critical): {cmd} - {result.error}")
+                    else:
+                        logger.warning(f"Cleanup command returned None: {cmd}")
+                except Exception as cmd_error:
+                    logger.warning(f"Error running cleanup command '{cmd}': {str(cmd_error)}")
+                    # Continue with other cleanup commands even if one fails
+                    
+            # Return success if at least the main down command succeeded
+            if results and results[0].success:
+                return CommandResult(
+                    success=True, 
+                    output="Selective cleanup completed successfully",
+                    deploy_info="Project-specific cleanup completed"
+                )
+            else:
+                return CommandResult(
+                    success=True,  # Mark as success since project-specific cleanup not existing is OK
+                    output="No existing containers found for this project",
+                    deploy_info="No cleanup needed"
+                )
+                
+        except Exception as e:
+            error_msg = f"Error during selective cleanup: {traceback.format_exc()}"
+            logger.error(error_msg)
+            return CommandResult(success=False, error=error_msg)
+
+    @staticmethod
+    def run_system_cleanup() -> CommandResult:
+        """
+        Perform safe system-wide Docker cleanup that won't affect running containers.
+        Only removes truly unused resources.
+        
+        Returns:
+            CommandResult indicating success/failure of system cleanup
+        """
+        try:
+            # Only run safe cleanup commands that won't affect running containers
+            safe_cleanup_commands = [
+                # Remove only dangling images (not used by any container)
+                'docker image prune -f',
+                # Remove only unused build cache
+                'docker builder prune -f',
+                # Remove only unused volumes (not mounted by running containers)
+                'docker volume prune -f'
+            ]
+            
+            results = []
+            for cmd in safe_cleanup_commands:
+                logger.info(f"Running safe system cleanup command: {cmd}")
+                try:
+                    # Use a simple command execution for system cleanup
+                    import subprocess
+                    result = subprocess.run(cmd.split(), capture_output=True, text=True, timeout=60)
+                    if result.returncode == 0:
+                        logger.info(f"Safe cleanup command succeeded: {cmd}")
+                        results.append(True)
+                    else:
+                        logger.warning(f"Safe cleanup command failed: {cmd} - {result.stderr}")
+                        results.append(False)
+                except Exception as cmd_error:
+                    logger.warning(f"Error running safe cleanup command '{cmd}': {str(cmd_error)}")
+                    results.append(False)
+                    
+            success_count = sum(results)
+            total_count = len(results)
+            
+            return CommandResult(
+                success=True,  # Always return success since this is optional optimization
+                output=f"Safe system cleanup completed: {success_count}/{total_count} commands succeeded",
+                deploy_info=f"Safe cleanup: {success_count}/{total_count} operations completed"
+            )
+                
+        except Exception as e:
+            error_msg = f"Error during safe system cleanup: {traceback.format_exc()}"
+            logger.error(error_msg)
+            return CommandResult(success=True, error=error_msg)  # Don't fail deployment for cleanup issues

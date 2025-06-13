@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Parse command line arguments
+MANAGE_TRAEFIK=false
+for arg in "$@"; do
+    case $arg in
+        traefik=true)
+            MANAGE_TRAEFIK=true
+            shift
+            ;;
+        *)
+            # Unknown option
+            ;;
+    esac
+done
+
 # Configuration
 REMOTE_USER="azureuser"  # Change this to your VM's username
 REMOTE_HOST="98.70.36.150"  # Change this to your VM's IP or hostname
@@ -33,27 +47,36 @@ ssh -i $SSH_KEY_PATH $REMOTE_USER@$REMOTE_HOST << EOF
     cd $REMOTE_PATH
     unzip -o app.zip
     rm app.zip
-    # Stop containers. Commenting traefik. We do not need to bring it down.
-    #docker compose -f docker-compose-traefik.yml down
+    
+    # Stop containers
+    if [ "$MANAGE_TRAEFIK" = true ]; then
+        echo "Stopping Traefik..."
+        docker compose -f docker-compose-traefik.yml down
+    fi
     docker compose -f docker-compose-prod.yml down
     
     # Clean up
     docker system prune -f
     # Flush Redis queue
-    docker exec $(docker ps -q -f name=redis) redis-cli FLUSHALL
+    docker exec \$(docker ps -q -f name=redis) redis-cli FLUSHALL 2>/dev/null || echo "Redis not running or no containers to flush"
     docker network prune -f
-    #Traefik network is already created. we may not need to create it.
-    docker network create traefik-public || true
-    # Start with logging
-    echo "Starting Traefik..."
-    docker compose -f docker-compose-traefik.yml up -d
+    
+    # Create Traefik network if managing Traefik
+    if [ "$MANAGE_TRAEFIK" = true ]; then
+        docker network create traefik-public || true
+        echo "Starting Traefik..."
+        docker compose -f docker-compose-traefik.yml up -d
+    fi
     
     echo "Starting application..."
-    # Fix: Remove duplicate compose file reference
     docker compose -f docker-compose-prod.yml up -d --build
     
     # Check status
     docker compose -f docker-compose-prod.yml ps
+    if [ "$MANAGE_TRAEFIK" = true ]; then
+        echo "Traefik status:"
+        docker compose -f docker-compose-traefik.yml ps
+    fi
     docker compose -f docker-compose-prod.yml logs
 EOF
 

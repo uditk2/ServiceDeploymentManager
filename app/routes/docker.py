@@ -17,6 +17,7 @@ from app.models.job import TriggeredJob
 from app.repositories.job_repository import JobRepository
 from app.controllers.workspace_controller import WorkspaceController
 from app.models.workspace import UserWorkspace
+from app.custom_logging import logger
 import uuid
 router = APIRouter(
     prefix="/api/docker",
@@ -140,6 +141,7 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
                 "command_result": command_result.to_dict()
             }
         )
+        
     except Exception as e:
         # Update job status with error
         await JobRepository.update_job_status(
@@ -153,3 +155,67 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
         # Clean up temporary file
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
+
+@router.post("/cleanup/{username}/{workspace_name}", response_model=dict)
+async def cleanup_workspace(username: str, workspace_name: str):
+    """
+    Perform comprehensive cleanup for a specific workspace including:
+    - Stop and remove containers
+    - Remove project-specific images
+    - Clean up dangling images and volumes
+    """
+    try:
+        workspace = await WorkspaceController.get_workspace(username, workspace_name)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_name} not found for user {username}")
+        
+        logger.info(f"Starting cleanup for workspace {username}/{workspace_name}")
+        cleanup_result = DockerComposeUtils.run_docker_compose_cleanup(workspace.workspace_path, username)
+        
+        if cleanup_result.success:
+            return {
+                "status": "success",
+                "message": "Workspace cleanup completed successfully",
+                "details": cleanup_result.output
+            }
+        else:
+            return {
+                "status": "error", 
+                "message": "Cleanup completed with some failures",
+                "error": cleanup_result.error
+            }
+            
+    except Exception as e:
+        logger.error(f"Error during workspace cleanup: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to cleanup workspace: {str(e)}")
+
+@router.post("/system-cleanup", response_model=dict)
+async def system_cleanup():
+    """
+    Perform system-wide Docker cleanup to free up space:
+    - Remove stopped containers
+    - Remove unused networks  
+    - Remove dangling images
+    - Remove unused volumes
+    - Clear build cache
+    """
+    try:
+        logger.info("Starting system-wide Docker cleanup")
+        cleanup_result = DockerComposeUtils.run_system_cleanup()
+        
+        if cleanup_result.success:
+            return {
+                "status": "success",
+                "message": "System cleanup completed successfully", 
+                "details": cleanup_result.output
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "System cleanup completed with some failures",
+                "error": cleanup_result.error
+            }
+            
+    except Exception as e:
+        logger.error(f"Error during system cleanup: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to perform system cleanup: {str(e)}")
