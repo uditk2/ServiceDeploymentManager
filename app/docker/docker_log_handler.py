@@ -10,6 +10,8 @@ from app.transient_store.redis_store import redis_store
 from threading import Event, Thread
 from app.custom_logging import logger
 from .helper_functions import get_log_file_path
+from .compose_log_watcher import ComposeLogWatcher
+
 
 class CommandResult:
     def __init__(self, success: bool, output: str = None, error: str = None, deploy_info: str = None):
@@ -193,6 +195,7 @@ class DockerComposeLogHandler:
         """
         self.project_logs_path = logs_path
         self.processes = {}  # Store processes by project name
+        self.log_watchers = {}  # Store log watcher instances by project name
         self.stop_event = Event()
     
     def follow_compose_logs(self, compose_file, project_name, retain_logs=False):
@@ -238,6 +241,18 @@ class DockerComposeLogHandler:
                 close_fds=True
             )
             
+            # Create and start log watcher for this stack
+            log_watcher = ComposeLogWatcher(
+                stack_name=project_name,
+                compose_file=compose_file,
+                project_name=project_name
+            )
+            # For new deployments (retain_logs=False), start from beginning to capture full deployment
+            # For restarts (retain_logs=True), resume from last position
+            start_from_beginning = not retain_logs
+            log_watcher.start_watching(log_file, start_from_beginning=start_from_beginning)
+            self.log_watchers[project_name] = log_watcher
+            
             # Start a monitoring thread for this process
             monitor_thread = Thread(
                 target=self._monitor_compose_project,
@@ -257,6 +272,7 @@ class DockerComposeLogHandler:
             }
             
             logger.info(f"Docker Compose logs for project {project_name} being written to {log_file}")
+            logger.info(f"Watchdog log watcher started for Docker Compose stack: {project_name}")
             return True
             
         except Exception as e:
@@ -303,6 +319,12 @@ class DockerComposeLogHandler:
             project_name (str): Name of the Docker Compose project
         """
         try:
+            # Stop log watcher if it exists
+            if project_name in self.log_watchers:
+                logger.info(f"Stopping watchdog log watcher for stack: {project_name}")
+                self.log_watchers[project_name].stop_watching()
+                del self.log_watchers[project_name]
+            
             if project_name not in self.processes:
                 return False
                 
@@ -344,6 +366,12 @@ class DockerComposeLogHandler:
         """Graceful shutdown of all logging processes"""
         logger.info("Initiating Docker Compose log handler shutdown")
         self.stop_event.set()
+        
+        # Stop all log watchers
+        for project_name, log_watcher in list(self.log_watchers.items()):
+            logger.info(f"Stopping watchdog log watcher for stack: {project_name}")
+            log_watcher.stop_watching()
+        self.log_watchers.clear()
         
         # Clean up all processes
         for project_name in list(self.processes.keys()):

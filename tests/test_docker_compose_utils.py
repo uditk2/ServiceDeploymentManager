@@ -86,6 +86,7 @@ PROJECT_PATH = f"./tests/{TEST_WORKSPACE}"
 sys.path.append('.')
 from app.docker.docker_compose_utils import DockerComposeUtils
 from app.docker.docker_log_handler import CommandResult
+from app.docker.helper_functions import generate_project_name_from_user_workspace
 
 
 def setup_test_project():
@@ -120,7 +121,7 @@ def test_generate_deploy_command():
     
     try:
         compose_file = os.path.join(PROJECT_PATH, "docker-compose.yml")
-        project_name = f"{TEST_USERNAME}_{TEST_WORKSPACE}"
+        project_name = generate_project_name_from_user_workspace(TEST_USERNAME, TEST_WORKSPACE)
         
         # Test without env file
         cmd = DockerComposeUtils.generate_deploy_command(

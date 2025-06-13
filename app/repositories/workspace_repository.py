@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict
 from app.database import user_workspace_collection
-from app.models.workspace import UserWorkspace
+from app.models.workspace import UserWorkspace, LogWatcherInfo
 from datetime import datetime
 import re
 
@@ -93,3 +93,111 @@ class WorkspaceRepository:
         })
         
         return result.deleted_count > 0
+    
+    # Log Watcher Management Methods
+    
+    @staticmethod
+    async def update_log_watcher_state(username: str, workspace_name: str, log_watcher_info: LogWatcherInfo) -> bool:
+        """Update log watcher state for a workspace"""
+        result = await user_workspace_collection.update_one(
+            {
+                "username": username,
+                "workspace_name": {"$regex": f"^{re.escape(workspace_name)}$", "$options": "i"}
+            },
+            {
+                "$set": {
+                    "log_watcher": log_watcher_info.dict(),
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    async def mark_log_watcher_active(username: str, workspace_name: str, project_name: str, 
+                                    pid: Optional[int] = None, log_file: Optional[str] = None) -> bool:
+        """Mark log watcher as active"""
+        log_watcher = LogWatcherInfo()
+        log_watcher.mark_as_active(project_name, pid, log_file)
+        return await WorkspaceRepository.update_log_watcher_state(username, workspace_name, log_watcher)
+    
+    @staticmethod
+    async def mark_log_watcher_stopped(username: str, workspace_name: str) -> bool:
+        """Mark log watcher as stopped"""
+        log_watcher = LogWatcherInfo()
+        log_watcher.mark_as_stopped()
+        return await WorkspaceRepository.update_log_watcher_state(username, workspace_name, log_watcher)
+    
+    @staticmethod
+    async def mark_log_watcher_failed(username: str, workspace_name: str, error_message: str) -> bool:
+        """Mark log watcher as failed"""
+        # Get current log watcher state to preserve error count
+        workspace = await WorkspaceRepository.get_workspace(username, workspace_name)
+        if workspace:
+            log_watcher = workspace.log_watcher
+            log_watcher.mark_as_failed(error_message)
+            return await WorkspaceRepository.update_log_watcher_state(username, workspace_name, log_watcher)
+        return False
+    
+    @staticmethod
+    async def get_workspaces_for_resurrection() -> List[UserWorkspace]:
+        """Get all workspaces that should have their log watchers resurrected"""
+        cursor = user_workspace_collection.find({
+            "$or": [
+                {"log_watcher.status": "active"},
+                {"log_watcher.status": "stopped"}
+            ],
+            "log_watcher.error_count": {"$lt": 5}
+        })
+        
+        workspaces = []
+        async for workspace_dict in cursor:
+            workspaces.append(UserWorkspace(**workspace_dict))
+        
+        return workspaces
+    
+    @staticmethod
+    async def get_active_log_watchers() -> List[UserWorkspace]:
+        """Get all workspaces with active log watchers"""
+        cursor = user_workspace_collection.find({
+            "log_watcher.status": "active"
+        })
+        
+        workspaces = []
+        async for workspace_dict in cursor:
+            workspaces.append(UserWorkspace(**workspace_dict))
+        
+        return workspaces
+    
+    @staticmethod
+    async def cleanup_orphaned_log_watchers() -> int:
+        """Mark log watchers as orphaned if their processes are no longer running"""
+        import psutil
+        
+        active_watchers = await WorkspaceRepository.get_active_log_watchers()
+        orphaned_count = 0
+        
+        for workspace in active_watchers:
+            if workspace.log_watcher.log_handler_pid:
+                try:
+                    # Check if process is still running
+                    if not psutil.pid_exists(workspace.log_watcher.log_handler_pid):
+                        # Mark as orphaned
+                        workspace.log_watcher.status = "orphaned"
+                        await WorkspaceRepository.update_log_watcher_state(
+                            workspace.username, 
+                            workspace.workspace_name, 
+                            workspace.log_watcher
+                        )
+                        orphaned_count += 1
+                except Exception:
+                    # If we can't check the process, mark as orphaned
+                    workspace.log_watcher.status = "orphaned"
+                    await WorkspaceRepository.update_log_watcher_state(
+                        workspace.username, 
+                        workspace.workspace_name, 
+                        workspace.log_watcher
+                    )
+                    orphaned_count += 1
+        
+        return orphaned_count

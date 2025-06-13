@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 from dotenv import load_dotenv
+import asyncio
+import os
+from contextlib import asynccontextmanager
 
 # Load environment variables
 load_dotenv()
@@ -15,11 +18,26 @@ from app.models.job import TriggeredJob
 from app.repositories.workspace_repository import WorkspaceRepository
 from app.repositories.job_repository import JobRepository
 
-# Initialize FastAPI app
+# Import log watcher manager
+from app.docker.log_watcher_manager import log_watcher_manager
+from app.custom_logging import logger
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting application...")
+    await log_watcher_manager.initialize()
+    yield
+    # Shutdown
+    logger.info("Shutting down application...")
+    await log_watcher_manager.shutdown()
+
+# Initialize FastAPI app with lifespan events
 app = FastAPI(
     title="Deployment Manager API",
     description="API for managing deployments and running Docker commands",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Include routers from route modules

@@ -53,12 +53,6 @@ class DockerUtils():
             return None
 
     @staticmethod
-    def get_container_name(user_id: str, project_name: str) -> str:
-        """Generate a container name from user ID and project name"""
-        sanitized_name = f"{user_id}-{project_name}".lower()
-        return "".join(c for c in sanitized_name if c.isalnum() or c in ('-', '_'))
-
-    @staticmethod
     def get_build_result(container_id, success, url, error=None) -> Dict[str, Any]:
         """Build a response based on deployment success"""
         return {

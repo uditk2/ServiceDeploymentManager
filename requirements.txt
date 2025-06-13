@@ -13,6 +13,8 @@ psutil
 redis
 # Utilities
 PyYAML==6.0.1
+# File monitoring
+watchdog>=3.0.0
 
 # Add dnspython to requirements.txt if not already present
 dnspython>=2.2.1

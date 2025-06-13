@@ -62,6 +62,23 @@ class WorkspaceController:
             if not workspace:
                 raise ValueError(f"Workspace {workspace_name} not found for user {username}")
 
+            # Stop any active log watchers for this workspace
+            try:
+                from app.docker.log_watcher_manager import log_watcher_manager
+                from app.docker.helper_functions import generate_project_name_from_user_workspace
+                
+                project_name = generate_project_name_from_user_workspace(username, workspace_name)
+                
+                # Stop log watcher if the manager is initialized
+                if log_watcher_manager._initialized and log_watcher_manager._log_handler:
+                    if project_name in log_watcher_manager._log_handler.log_watchers:
+                        logger.info(f"Stopping log watcher for workspace deletion: {username}/{workspace_name}")
+                        log_watcher_manager._log_handler._cleanup_process(project_name)
+                        
+            except Exception as e:
+                logger.warning(f"Error stopping log watcher during workspace deletion: {str(e)}")
+                # Don't fail the deletion if log watcher cleanup fails
+
             # Stop and remove any running containers
             try:
                 # Try docker-compose down first
@@ -69,8 +86,8 @@ class WorkspaceController:
                     project_path=workspace.workspace_path,
                     user_id=username
                 )
-                if not result["success"]:
-                    raise Exception(result["message"])
+                if not result.success:
+                    logger.warning(f"Docker compose down failed: {result.error}")
             except Exception as e:
                 logger.error(f"Error cleaning up containers: {str(e)}")
 

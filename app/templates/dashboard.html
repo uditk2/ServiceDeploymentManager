@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Deployment Manager - Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f6fa;
+            min-height: 100vh;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 1.8rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+        }
+        
+        .logo::before {
+            content: "🚀";
+            margin-right: 10px;
+            font-size: 2rem;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+        
+        .welcome-section {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .welcome-title {
+            font-size: 2rem;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .welcome-subtitle {
+            color: #7f8c8d;
+            font-size: 1.1rem;
+            margin-bottom: 20px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: transform 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #3498db;
+            margin-bottom: 10px;
+        }
+        
+        .stat-label {
+            color: #7f8c8d;
+            font-weight: 600;
+        }
+        
+        .services-section {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .section-title {
+            font-size: 1.5rem;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .refresh-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-left: auto;
+        }
+        
+        .refresh-btn:hover {
+            background: #2980b9;
+        }
+        
+        .service-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .service-card {
+            border: 1px solid #e1e8ed;
+            border-radius: 10px;
+            padding: 20px;
+            transition: box-shadow 0.3s;
+        }
+        
+        .service-card:hover {
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .service-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .service-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .service-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .status-running {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-stopped {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-unknown {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .service-details {
+            color: #7f8c8d;
+            line-height: 1.6;
+        }
+        
+        .service-actions {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .action-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.3s;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+        
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        
+        .quick-actions {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .quick-action-btn {
+            background: #e74c3c;
+            color: white;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        
+        .quick-action-btn:hover {
+            background: #c0392b;
+            text-decoration: none;
+        }
+        
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .service-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <div class="logo">Service Deployment Manager</div>
+            <div class="user-info">
+                <span id="welcomeUser">Welcome, User</span>
+                <button class="logout-btn" onclick="logout()">Logout</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="welcome-section">
+            <h1 class="welcome-title">Dashboard</h1>
+            <p class="welcome-subtitle">Manage and monitor your deployed services</p>
+            
+            <div class="quick-actions">
+                <a href="/docs" class="quick-action-btn">📚 API Documentation</a>
+                <a href="/redoc" class="quick-action-btn">📖 ReDoc</a>
+                <button class="quick-action-btn" onclick="refreshServices()">🔄 Refresh Services</button>
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number" id="totalServices">-</div>
+                <div class="stat-label">Total Services</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="runningServices">-</div>
+                <div class="stat-label">Running</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="stoppedServices">-</div>
+                <div class="stat-label">Stopped</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalWorkspaces">-</div>
+                <div class="stat-label">Workspaces</div>
+            </div>
+        </div>
+        
+        <div class="services-section">
+            <div class="section-title">
+                🏗️ Deployed Services
+                <button class="refresh-btn" onclick="refreshServices()">Refresh</button>
+            </div>
+            
+            <div id="servicesContainer">
+                <div class="loading">Loading services...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Check authentication on page load
+        window.addEventListener('load', function() {
+            const basicAuth = sessionStorage.getItem('basicAuth');
+            const username = sessionStorage.getItem('username');
+            
+            if (!basicAuth) {
+                window.location.href = '/';
+                return;
+            }
+            
+            if (username) {
+                document.getElementById('welcomeUser').textContent = `Welcome, ${username}`;
+            }
+            
+            loadServices();
+        });
+        
+        function getAuthHeaders() {
+            const basicAuth = sessionStorage.getItem('basicAuth');
+            return {
+                'Authorization': 'Basic ' + basicAuth,
+                'Content-Type': 'application/json'
+            };
+        }
+        
+        function logout() {
+            sessionStorage.removeItem('basicAuth');
+            sessionStorage.removeItem('username');
+            window.location.href = '/';
+        }
+        
+        async function loadServices() {
+            try {
+                // Load workspaces data
+                const response = await fetch('/api/workspaces', {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch services');
+                }
+                
+                const workspaces = await response.json();
+                displayServices(workspaces);
+                updateStats(workspaces);
+                
+            } catch (error) {
+                console.error('Error loading services:', error);
+                document.getElementById('servicesContainer').innerHTML = 
+                    '<div class="empty-state"><h3>Error loading services</h3><p>Please check your connection and try again.</p></div>';
+            }
+        }
+        
+        function displayServices(workspaces) {
+            const container = document.getElementById('servicesContainer');
+            
+            if (!workspaces || workspaces.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No services deployed</h3>
+                        <p>Start by creating a new workspace and deploying your first service.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const servicesHTML = workspaces.map(workspace => `
+                <div class="service-card">
+                    <div class="service-header">
+                        <div class="service-name">${workspace.workspace_name}</div>
+                        <div class="service-status status-unknown">Unknown</div>
+                    </div>
+                    <div class="service-details">
+                        <strong>Username:</strong> ${workspace.username}<br>
+                        <strong>Image:</strong> ${workspace.docker_image_name || 'Not specified'}<br>
+                        <strong>Created:</strong> ${workspace.created_at ? new Date(workspace.created_at).toLocaleDateString() : 'Unknown'}
+                    </div>
+                    <div class="service-actions">
+                        <button class="action-btn btn-primary" onclick="viewLogs('${workspace.username}', '${workspace.workspace_name}')">
+                            📋 View Logs
+                        </button>
+                        <button class="action-btn btn-secondary" onclick="viewStats('${workspace.username}', '${workspace.workspace_name}')">
+                            📊 Stats
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = `<div class="service-grid">${servicesHTML}</div>`;
+        }
+        
+        function updateStats(workspaces) {
+            const total = workspaces.length;
+            document.getElementById('totalServices').textContent = total;
+            document.getElementById('totalWorkspaces').textContent = total;
+            
+            // For now, set running/stopped as unknown since we need to check actual container status
+            document.getElementById('runningServices').textContent = '?';
+            document.getElementById('stoppedServices').textContent = '?';
+        }
+        
+        function refreshServices() {
+            document.getElementById('servicesContainer').innerHTML = '<div class="loading">Refreshing services...</div>';
+            loadServices();
+        }
+        
+        function viewLogs(username, workspaceName) {
+            window.open(`/api/logs/${encodeURIComponent(username)}/${encodeURIComponent(workspaceName)}`, '_blank');
+        }
+        
+        function viewStats(username, workspaceName) {
+            window.open(`/api/stats/${encodeURIComponent(username)}/${encodeURIComponent(workspaceName)}`, '_blank');
+        }
+    </script>
+</body>
+</html>
