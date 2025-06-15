@@ -10,16 +10,16 @@ import time
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from app.custom_logging import logger
-from app.log_processor.processors import DummyLogProcessor
+from .workspace_monitor import WorkspaceMonitor
 
 
 class ComposeLogFileHandler(FileSystemEventHandler):
     """Watchdog file handler for Docker Compose log files"""
     
-    def __init__(self, log_file_path: str, processor, start_position: int = None):
+    def __init__(self, log_file_path: str, monitor:WorkspaceMonitor, start_position: int = None):
         super().__init__()
         self.log_file_path = log_file_path
-        self.processor = processor
+        self.monitor = monitor
         self.position_file = f"{log_file_path}.position"  # Store position in companion file
         
         # Determine starting position
@@ -84,10 +84,7 @@ class ComposeLogFileHandler(FileSystemEventHandler):
                 new_lines = f.readlines()
                 self.last_position = f.tell()
                 
-                # Process each new line
-                for line in new_lines:
-                    if line.strip():  # Skip empty lines
-                        self.processor.process_log_line(line)
+                self.monitor.monitor(new_lines)
                 
                 # Save position after processing
                 if new_lines:  # Only save if we actually processed something
@@ -100,19 +97,24 @@ class ComposeLogFileHandler(FileSystemEventHandler):
 class ComposeLogWatcher:
     """Log watcher instance for Docker Compose stacks using watchdog"""
     
-    def __init__(self, stack_name: str, compose_file: str, project_name: str, processor_class=None):
+    def __init__(self, stack_name: str, compose_file: str, project_name: str, project_path: str = None):
         self.stack_name = stack_name
         self.compose_file = compose_file
         self.project_name = project_name
-        
-        # Use provided processor class or default to DummyLogProcessor
-        if processor_class is None:
-            processor_class = DummyLogProcessor
-        
-        self.processor = processor_class(stack_name)
+        self.project_path = project_path
         self.observer = None
         self.is_watching = False
         self.file_handler = None
+        
+        # Create WorkspaceMonitor instance if project_path is provided
+        self.monitor = None
+        if project_path:
+            try:
+                self.monitor = WorkspaceMonitor(project_path)
+                logger.info(f"Created WorkspaceMonitor for stack {stack_name}")
+            except Exception as e:
+                logger.error(f"Failed to create WorkspaceMonitor for {stack_name}: {str(e)}")
+                # Continue without monitor - log watching will still work, just no error monitoring
         
     def start_watching(self, log_file_path: str, start_from_beginning: bool = False):
         """
@@ -147,7 +149,7 @@ class ComposeLogWatcher:
                 logger.info("Starting log watcher with resume capability")
             
             # Set up file handler with position tracking
-            self.file_handler = ComposeLogFileHandler(log_file_path, self.processor, start_position)
+            self.file_handler = ComposeLogFileHandler(log_file_path, self.monitor, start_position)
             
             # Set up observer
             self.observer = Observer()
@@ -172,10 +174,16 @@ class ComposeLogWatcher:
             
     def get_stats(self):
         """Get processing statistics"""
-        processor_stats = self.processor.get_stats() if hasattr(self.processor, 'get_stats') else {}
+        monitor_stats = {}
+        if self.monitor:
+            monitor_stats = {
+                'errors_found': getattr(self.monitor, 'total_errors_found', 0),
+                'bugs_submitted': getattr(self.monitor, 'bugs_submitted', 0)
+            }
+        
         return {
             'stack_name': self.stack_name,
             'project_name': self.project_name,
             'is_watching': self.is_watching,
-            'processor_stats': processor_stats
+            'monitor_stats': monitor_stats
         }

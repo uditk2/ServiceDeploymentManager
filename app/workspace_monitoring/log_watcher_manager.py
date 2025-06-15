@@ -13,7 +13,7 @@ from typing import Optional, Dict, List
 from app.custom_logging import logger
 from app.docker.docker_log_handler import DockerComposeLogHandler
 from app.models.workspace import UserWorkspace
-
+from app.docker.helper_functions import generate_project_name_from_user_workspace
 
 class LogWatcherManager:
     """Manages resurrection of Docker Compose log watchers on system startup"""
@@ -308,7 +308,7 @@ class LogWatcherManager:
         Returns:
             Generated project name
         """
-        from .helper_functions import generate_project_name_from_user_workspace
+        
         return generate_project_name_from_user_workspace(username, workspace_name)
     
     def get_log_handler_for_deployment(self) -> Optional[DockerComposeLogHandler]:

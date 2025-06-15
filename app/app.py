@@ -19,7 +19,7 @@ from app.repositories.workspace_repository import WorkspaceRepository
 from app.repositories.job_repository import JobRepository
 
 # Import log watcher manager
-from app.docker.log_watcher_manager import log_watcher_manager
+from app.workspace_monitoring.log_watcher_manager import log_watcher_manager
 from app.custom_logging import logger
 
 @asynccontextmanager

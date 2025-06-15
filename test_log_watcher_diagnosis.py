@@ -10,10 +10,10 @@ import tempfile
 from pathlib import Path
 
 # Add the project root to Python path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent
 sys.path.append(str(project_root))
 
-from app.docker.compose_log_watcher import ComposeLogWatcher
+from app.workspace_monitoring.compose_log_watcher import ComposeLogWatcher
 from app.custom_logging import logger
 
 def test_log_watcher():

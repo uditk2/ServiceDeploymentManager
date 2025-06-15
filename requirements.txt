@@ -18,3 +18,12 @@ watchdog>=3.0.0
 
 # Add dnspython to requirements.txt if not already present
 dnspython>=2.2.1
+
+# AI/ML Client Libraries
+openai>=1.0.0
+anthropic>=0.25.0
+azure-ai-inference
+azure-core>=1.28.0
+
+# Retry functionality
+retrying

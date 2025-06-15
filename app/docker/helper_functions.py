@@ -5,6 +5,32 @@ def extract_user_id(user_id):
     """Extract user ID from email"""
     return user_id.replace(".", "").split("@")[0]
 
+def extract_username_and_workspace_from_path(project_path: str) -> tuple[str, str]:
+    """
+    Extract username and workspace name from project path.
+    
+    This function analyzes the project path structure to determine the username
+    and workspace name. The path typically follows patterns like:
+    /path/to/workspaces/{username}/{workspace_name}
+    
+    Args:
+        project_path (str): The full path to the project/workspace
+        
+    Returns:
+        tuple[str, str]: (username, workspace_name)
+        
+    Raises:
+        ValueError: If the path structure doesn't match expected patterns
+    """
+    path_obj = Path(project_path)
+    path_parts = path_obj.parts
+    
+    if len(path_parts) >= 2:
+        username = path_parts[-2]
+        workspace_name = path_parts[-1]
+        return username, workspace_name
+    raise ValueError(f"Could not extract username and workspace from path '{project_path}': {str(e)}")
+
 def generate_unique_name(project_base_path=None, user_id=None):
     """Generate a unique name using project and user ID"""
     project_name = Path(project_base_path).name

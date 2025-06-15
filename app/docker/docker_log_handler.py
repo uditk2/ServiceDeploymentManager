@@ -10,7 +10,7 @@ from app.transient_store.redis_store import redis_store
 from threading import Event, Thread
 from app.custom_logging import logger
 from .helper_functions import get_log_file_path
-from .compose_log_watcher import ComposeLogWatcher
+from app.workspace_monitoring.compose_log_watcher import ComposeLogWatcher
 
 
 class CommandResult:
@@ -245,7 +245,8 @@ class DockerComposeLogHandler:
             log_watcher = ComposeLogWatcher(
                 stack_name=project_name,
                 compose_file=compose_file,
-                project_name=project_name
+                project_name=project_name,
+                project_logs_path=self.project_logs_path
             )
             # For new deployments (retain_logs=False), start from beginning to capture full deployment
             # For restarts (retain_logs=True), resume from last position

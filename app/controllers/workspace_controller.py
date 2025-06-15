@@ -7,7 +7,8 @@ import os
 import tempfile
 import shutil
 from app.custom_logging import logger
-
+from app.workspace_monitoring.log_watcher_manager import log_watcher_manager
+from app.docker.helper_functions import generate_project_name_from_user_workspace
 class WorkspaceController:
     @staticmethod
     async def create_workspace(workspace: UserWorkspace) -> Dict:
@@ -64,8 +65,7 @@ class WorkspaceController:
 
             # Stop any active log watchers for this workspace
             try:
-                from app.docker.log_watcher_manager import log_watcher_manager
-                from app.docker.helper_functions import generate_project_name_from_user_workspace
+                
                 
                 project_name = generate_project_name_from_user_workspace(username, workspace_name)
                 

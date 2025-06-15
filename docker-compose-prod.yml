@@ -17,6 +17,7 @@ services:
       - LOGS_DIR=/app/logs
       - DOCKER_BASE_DIR=/app/docker/deployments
       - BASE_VOLUME_DIR_MAP=/app/docker/deployments:/home/azureuser/deployments
+      - APP_BUILDER_URL=https://appbuilder.synergiqai.com
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]

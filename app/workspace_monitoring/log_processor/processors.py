@@ -6,7 +6,7 @@ log lines from Docker Compose stacks.
 """
 
 from app.custom_logging import logger
-
+from .error_identifier import ErrorIdentifier
 
 class DummyLogProcessor:
     """Dummy log processor class that gets invoked with logs from Docker Compose stacks"""
@@ -16,32 +16,21 @@ class DummyLogProcessor:
         self.processed_count = 0
         self.error_count = 0
         self.warning_count = 0
-        
-    def process_log_line(self, log_line: str):
+    
+    def process_log(self, log_lines: list):
         """
-        Process a single log line from the Docker Compose stack
+        Process a list of log lines from the Docker Compose stack
         
         Args:
-            log_line (str): The log line to process
+            log_lines (list): List of log lines to process
         """
-        logger.info(f"[LogProcessor-{self.stack_name}] Processing log line: {log_line.strip()}")
-        self.processed_count += 1
+        logger.info(f"[LogProcessor-{self.stack_name}] Starting to process {len(log_lines)} log lines")
         
-        # Convert to lowercase for pattern matching
-        line_lower = log_line.lower()
-        
-        # Count different log levels
-        if any(pattern in line_lower for pattern in ['error', 'exception', 'failed', 'fatal']):
-            self.error_count += 1
-            logger.info(f"[LogProcessor-{self.stack_name}] Detected error pattern: {log_line.strip()}")
-        elif any(pattern in line_lower for pattern in ['warning', 'warn']):
-            self.warning_count += 1
-            logger.debug(f"[LogProcessor-{self.stack_name}] Detected warning: {log_line.strip()}")
-        
-        # Log processing stats every 100 lines to avoid spam
-        if self.processed_count % 100 == 0:
-            logger.info(f"[LogProcessor-{self.stack_name}] Stats - Processed: {self.processed_count}, Errors: {self.error_count}, Warnings: {self.warning_count}")
-    
+        result = ErrorIdentifier().identify_errors("\n".join(log_lines))
+        if result and result["errors"]:
+            ## for each error log, send it to /task-handler/api
+            logger.info(f"[LogProcessor-{self.stack_name}] Identified {len(result['errors'])} error logs")
+
     def get_stats(self):
         """Get processing statistics"""
         return {

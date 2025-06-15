@@ -19,6 +19,7 @@ services:
       - DOCKER_BASE_DIR=/app/docker/deployments
       - BASE_VOLUME_DIR_MAP=/app/docker/deployments:/Users/uditkhandelwal/Documents/testing
       - DATABASE=deployment_manager_test
+      - APP_BUILDER_URL=http://localhost:8002
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
