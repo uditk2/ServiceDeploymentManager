@@ -67,5 +67,5 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 EXPOSE 8005
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-# Command to run the application
-CMD ["uvicorn", "app.app:app", "--host", "0.0.0.0", "--port", "8005", "--workers", "4"]
+# Command to run the application - disable access logging to stop health check spam
+CMD ["uvicorn", "app.app:app", "--host", "0.0.0.0", "--port", "8005", "--workers", "4", "--no-access-log"]
