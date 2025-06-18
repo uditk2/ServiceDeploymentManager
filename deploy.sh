@@ -16,11 +16,12 @@ done
 
 # Configuration
 REMOTE_USER="azureuser"  # Change this to your VM's username
-REMOTE_HOST="98.70.36.150"  # Change this to your VM's IP or hostname
+REMOTE_HOST="20.244.12.2"  # Change this to your VM's IP or hostname
 REMOTE_PATH="/home/azureuser/ws"  # Change this to your desired remote path
+ENTRY_PATH="/home/azureuser"  # Change this to your app's entry point path
 SSH_KEY_PATH="~/.ssh/azurevm.pem"  # Change this to your SSH private key path
 ZIP_FILE="app.zip"
-
+SERVICE_LOGS_PATH="/home/azureuser/logs"  # Change this to your service logs path
 # Create zip file excluding unnecessary directories
 zip -r $ZIP_FILE . \
     -x "*.git/*" \
@@ -34,12 +35,14 @@ zip -r $ZIP_FILE . \
     -x "*.DS_Store" \
     -x "logs/*" \
     -x "workspace/*" \
+    -x "tests/*" \
     -x "vnc/*" \
     -x "sandbox/*" \
     -x "$ZIP_FILE"
 
 # Copy zip file to remote server
 scp -i $SSH_KEY_PATH $ZIP_FILE $REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH
+
 
 # SSH into remote server and execute commands
 
