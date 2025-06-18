@@ -246,7 +246,7 @@ class DockerComposeLogHandler:
                 stack_name=project_name,
                 compose_file=compose_file,
                 project_name=project_name,
-                project_logs_path=self.project_logs_path
+                project_path=self.project_logs_path
             )
             # For new deployments (retain_logs=False), start from beginning to capture full deployment
             # For restarts (retain_logs=True), resume from last position

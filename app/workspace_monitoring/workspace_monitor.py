@@ -55,7 +55,7 @@ class WorkspaceMonitor:
         logger.info(f"[WorkspaceMonitor-{self.workspace_name}] Monitoring {len(log_stash)} log lines")
         
         try:
-            
+            log_stash = "\n".join(log_stash) if isinstance(log_stash, List) else log_stash
             # Identify errors using ErrorIdentifier
             error_result = self.error_identifier.identify_errors(log_stash)
             
