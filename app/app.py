@@ -21,6 +21,7 @@ from app.repositories.job_repository import JobRepository
 # Import log watcher manager
 from app.workspace_monitoring.log_watcher_manager import log_watcher_manager
 from app.custom_logging import logger
+from app.auth_middleware import AuthMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,6 +40,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Add authentication middleware
+app.add_middleware(AuthMiddleware)
 
 # Include routers from route modules
 app.include_router(general.router)

@@ -35,7 +35,8 @@ class ErrorReporter:
         }
         
         headers = {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Authorization": os.getenv("APP_BUILDER_TOKEN", "")
         }
         
         try:

@@ -3,7 +3,7 @@ import json
 import sys
 import time
 from datetime import datetime
-
+import os
 class Colors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -12,7 +12,9 @@ class Colors:
     FAIL = '\033[91m'
     ENDC = '\033[0m'
     BOLD = '\033[1m'
-
+from dotenv import load_dotenv
+# Load environment variables from .env file
+load_dotenv()
 def print_test_header(test_name):
     print(f"\n{Colors.HEADER}{Colors.BOLD}Running test: {test_name}{Colors.ENDC}")
 
@@ -58,19 +60,20 @@ LOCAL = "http://localhost:8005"
 API_BASE_URL = LOCAL # Change this to match your API server
 DOCKER_API_URL = f"{API_BASE_URL}/api/docker"
 JOB_API_URL = f"{API_BASE_URL}/api/jobs"
-TEST_USERNAME = "test_user"
-TEST_WORKSPACE = "test_workspace"
+TEST_USERNAME = "uditk2@gmail.com"
+TEST_WORKSPACE = "AdventureousChemist"
 
 def test_build_deploy_docker_image():
     """Build a Docker image for the project."""
     url = f"{DOCKER_API_URL}/build_deploy/{TEST_USERNAME}/{TEST_WORKSPACE}"
     print_test_header("Building and deploying Docker image")
-    zip_file_path = "./tests/SampleWebApp.zip"
+    zip_file_path = "tests/AdventureousChemist.zip"
     
     try:
         with open(zip_file_path, 'rb') as f:
             files = {'zip_file': (zip_file_path, f)}
-            headers = {'Accept': 'application/json'}
+            auth_token = os.getenv("AUTH_TOKEN")
+            headers = {'Accept': 'application/json', 'Authorization': f"{auth_token}"}
             print_info(f"Sending build request to {url}")
             response = requests.post(url, files=files, headers=headers)
             
@@ -92,7 +95,7 @@ def wait_for_job_completion(job_id):
     try:
         while True:
             print_info(f"Get job status for job id {job_id}")
-            response = requests.get(url)
+            response = requests.get(url, headers={'Accept': 'application/json', 'Authorization': f"{os.getenv('AUTH_TOKEN')}"})
             
             if response.status_code != 200:
                 print_warning(f"Response: {response.status_code} - {response.text}")
