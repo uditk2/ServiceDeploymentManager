@@ -21,7 +21,7 @@ class TraefikLabeler:
         self.domain_base = domain_base
         self.network_name = network_name
     
-    def add_traefik_labels(self, compose_file: str, project_name: str) -> str:
+    def add_traefik_labels(self, compose_file: str, project_name: str, output_file) -> str:
         """
         Add Traefik labels to services in a docker-compose.yml file.
         
@@ -38,16 +38,11 @@ class TraefikLabeler:
         
         # Apply Traefik configuration
         updated_compose, service_urls = self._process_compose_data(compose_data, project_name)
-        
-        # Generate output filename
-        base_filename, ext = os.path.splitext(compose_file)
-        output_file = f"{base_filename}.traefik{ext}"
-        
         # Write the updated compose file
         with open(output_file, 'w') as f:
             yaml.dump(updated_compose, f, default_flow_style=False, sort_keys=False)
         
-        return output_file, service_urls
+        return service_urls
     
     def _process_compose_data(self, compose_data: Dict[str, Any], project_name: str) -> Dict[str, Any]:
         """

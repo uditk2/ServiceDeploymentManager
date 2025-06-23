@@ -87,6 +87,30 @@ def test_build_deploy_docker_image():
         print_failure(f"Test zip file not found: {zip_file_path}")
         return False
 
+def test_build_docker_image():
+    """Test the /build route for Docker image build only (no deploy)."""
+    url = f"{DOCKER_API_URL}/build/{TEST_USERNAME}/{TEST_WORKSPACE}"
+    print_test_header("Building Docker image (build only)")
+    zip_file_path = "tests/AdventureousChemist.zip"
+    
+    try:
+        with open(zip_file_path, 'rb') as f:
+            files = {'zip_file': (zip_file_path, f)}
+            auth_token = os.getenv("AUTH_TOKEN")
+            headers = {'Accept': 'application/json', 'Authorization': f"{auth_token}"}
+            print_info(f"Sending build request to {url}")
+            response = requests.post(url, files=files, headers=headers)
+            
+            if response.status_code != 200:
+                print_warning(f"Response: {response.status_code} - {response.text}")
+            else:
+                print_info(f"Response: {response.status_code}")
+                print_info(f"Response content: {response.content.decode('utf-8')}")
+            return wait_for_job_completion(response.json().get('job_id'))
+    except FileNotFoundError:
+        print_failure(f"Test zip file not found: {zip_file_path}")
+        return False
+
 def wait_for_job_completion(job_id):
     """Create a job for the Docker image build."""
     url = f"{JOB_API_URL}/{job_id}"
@@ -119,7 +143,8 @@ def wait_for_job_completion(job_id):
         
 def run_all_tests():
     tests = [
-        test_build_deploy_docker_image
+        test_build_deploy_docker_image,
+        test_build_docker_image
     ]
     
     results = []

@@ -19,7 +19,9 @@ services:
       - DOCKER_BASE_DIR=/app/docker/deployments
       - BASE_VOLUME_DIR_MAP=/app/docker/deployments:/Users/uditkhandelwal/Documents/testing
       - DATABASE=deployment_manager_test
-      - APP_BUILDER_URL=http://localhost:8002
+      - APP_BUILDER_URL=http://host.docker.internal:8002
+      - FLUENTD_HOST=host.docker.internal
+      - FLUENTD_PORT=24224
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
@@ -29,7 +31,13 @@ services:
       start_period: 10s
     networks:
       - backend-network
-  
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: host.docker.internal:24224
+        tag: internal.dev.deployment-manager
+    depends_on:
+      - redis
   redis:
     image: redis:alpine
     container_name: deploy-redis
@@ -38,6 +46,21 @@ services:
     restart: unless-stopped
     networks:
       - backend-network
+
+  fluentd:
+    image: fluent/fluentd:v1.16-1
+    platform: linux/amd64
+    container_name: fluentd
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    volumes:
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
+      - ./logs:/fluentd/log
+      - ./logs:/fluentd/internal/log
+    networks:
+      - backend-network
+    restart: unless-stopped
 
 volumes:
   redis_data:

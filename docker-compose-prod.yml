@@ -18,6 +18,8 @@ services:
       - DOCKER_BASE_DIR=/app/docker/deployments
       - BASE_VOLUME_DIR_MAP=/app/docker/deployments:/home/azureuser/deployments
       - APP_BUILDER_URL=https://appbuilder.synergiqai.com
+      - FLUENTD_HOST=10.1.0.4
+      - FLUENTD_PORT=24224
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
@@ -36,6 +38,14 @@ services:
     networks:
       - backend-network
       - traefik-public
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: fluentd:24224
+        tag: internal.production.deployment-manager
+    depends_on:
+      - redis
+      - fluentd
   
   redis:
     image: redis:alpine
@@ -45,6 +55,21 @@ services:
     restart: unless-stopped
     networks:
       - backend-network
+
+  fluentd:
+    image: fluent/fluentd:v1.16-1
+    platform: linux/amd64
+    container_name: fluentd-prod
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    volumes:
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
+      - /home/azureuser/deployments:/fluentd/log
+      - /home/azureuser/service:/fluentd/internal/log
+    networks:
+      - backend-network
+    restart: unless-stopped
 
 volumes:
   redis_data:

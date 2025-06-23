@@ -25,5 +25,11 @@ anthropic>=0.25.0
 azure-ai-inference
 azure-core>=1.28.0
 
+# Azure SDK for VM management
+azure-identity>=1.12.0
+azure-mgmt-compute>=29.0.0
+azure-mgmt-network>=22.0.0
+azure-mgmt-resource>=22.0.0
+
 # Retry functionality
 retrying

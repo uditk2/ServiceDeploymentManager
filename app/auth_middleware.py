@@ -13,10 +13,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.url.path in public_paths:
             return await call_next(request)
         auth_token = os.getenv("AUTH_TOKEN")
-        logger.info("Auth token from environment: %s", auth_token)
         headers_lower = {k.lower(): v for k, v in request.headers.items()}
         header_token = headers_lower.get("authorization")
-        logger.info("Auth token from request: %s", header_token)
         if not auth_token or header_token != auth_token:
             logger.warning("Unauthorized access attempt")
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})

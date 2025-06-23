@@ -71,8 +71,12 @@ def get_container_name(project_base_path=None, user_id=None):
 
 def get_log_file_path_user_workspace(project_base_path=None, user_id: str=None) -> str:
     project_name = get_container_name(project_base_path=project_base_path, user_id=user_id)
-    return get_log_file_path(project_base_path=project_base_path, project_name=project_name)
+    return get_service_log_file_path(project_base_path=project_base_path)
 
-def get_log_file_path(project_base_path=None, project_name: str=None) -> str:
-    log_file = os.path.join(project_base_path, f'{project_name}-compose.log')
+def get_service_log_file_path(project_base_path=None) -> str:
+    log_file = os.path.join(project_base_path, f'logs/app.log')
     return log_file
+
+def get_build_log_file_path(project_base_path=None, project_name: str=None) -> str:
+    build_log_file = os.path.join(project_base_path, f'{project_name}-build.log')
+    return build_log_file

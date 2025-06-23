@@ -2,6 +2,22 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 
+class VMConfig(BaseModel):
+    """Model for VM configuration within workspace"""
+    vm_name: Optional[str] = None
+    vm_id: Optional[str] = None
+    resource_group: Optional[str] = None
+    location: Optional[str] = None
+    vm_size: Optional[str] = None
+    private_ip: Optional[str] = None
+    nic_id: Optional[str] = None
+    vnet_name: Optional[str] = None
+    subnet_name: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    created_at: Optional[float] = None
+    last_checked: Optional[datetime] = None
+
 class LogWatcherInfo(BaseModel):
     """Embedded model for log watcher state within workspace"""
     status: str = "inactive"  # inactive, active, stopped, failed, orphaned
@@ -61,6 +77,9 @@ class UserWorkspace(BaseModel):
     
     # Log watcher state
     log_watcher: LogWatcherInfo = Field(default_factory=LogWatcherInfo)
+    
+    # VM configuration for spot VM deployment
+    vm_config: Optional[VMConfig] = None
 
     class Config:
         schema_extra = {
