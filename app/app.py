@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 load_dotenv()
 
 # Import routes
-from app.routes import general, docker, workspaces, jobs, logs, stats
+from app.routes import general, docker, workspaces, jobs, logs, stats, vm
 
 # Import models and repositories
 from app.models.workspace import UserWorkspace
@@ -51,3 +51,4 @@ app.include_router(workspaces.router)
 app.include_router(jobs.router)
 app.include_router(logs.router)
 app.include_router(stats.router)
+app.include_router(vm.router)

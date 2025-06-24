@@ -48,9 +48,6 @@ RUN mkdir -p /app/logs && \
 
 COPY . .
 
-# Copy SSH private key for VM connections
-COPY spot_vm_key.pem /app/ssh/spot_vm_key.pem
-RUN chmod 600 /app/ssh/spot_vm_key.pem && chown appuser:appuser /app/ssh/spot_vm_key.pem
 
 # Create non-root user and docker group
 RUN groupadd -g 999 docker && \
@@ -58,6 +55,11 @@ RUN groupadd -g 999 docker && \
     usermod -aG docker appuser && \
     chown -R appuser:appuser /app && \
     chmod -R 755 /app
+
+# Copy SSH private key for VM connections
+COPY spot_vm_key.pem /app/ssh/spot_vm_key.pem
+RUN chmod 600 /app/ssh/spot_vm_key.pem && chown appuser:appuser /app/ssh/spot_vm_key.pem
+
 
 USER appuser
 RUN git config --global user.email "appbuilder@synergiqai.com" && \
