@@ -48,6 +48,10 @@ RUN mkdir -p /app/logs && \
 
 COPY . .
 
+# Copy SSH private key for VM connections
+COPY spot_vm_key.pem /app/ssh/spot_vm_key.pem
+RUN chmod 600 /app/ssh/spot_vm_key.pem && chown appuser:appuser /app/ssh/spot_vm_key.pem
+
 # Create non-root user and docker group
 RUN groupadd -g 999 docker && \
     useradd -m appuser && \

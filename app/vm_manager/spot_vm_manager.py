@@ -96,6 +96,9 @@ class SpotVMManager:
                 # Check if VM is running
                 if self.is_vm_running(vm_name):
                     logger.info(f"VM {vm_name} is already running")
+                    # Update workspace with current VM details
+                    if workspace_id:
+                        self.vm_creator.update_workspace_table(user_id, workspace_id, existing_vm)
                     return {
                         'status': 'running',
                         'vm_config': existing_vm,
@@ -107,6 +110,9 @@ class SpotVMManager:
                     # Try to start the existing VM
                     if self.vm_creator.start_vm(vm_name):
                         updated_vm = self.vm_creator.get_vm_details(vm_name)
+                        # Update workspace with restarted VM details
+                        if workspace_id:
+                            self.vm_creator.update_workspace_table(user_id, workspace_id, updated_vm)
                         return {
                             'status': 'running',
                             'vm_config': updated_vm,
@@ -137,7 +143,7 @@ class SpotVMManager:
             
             # Update workspace with VM configuration if workspace_id provided
             if workspace_id:
-                self._update_workspace_vm_config(workspace_id, vm_config)
+                self.vm_creator.update_workspace_table(user_id, workspace_id, vm_config)
             
             return {
                 'status': 'running',
@@ -192,7 +198,7 @@ class SpotVMManager:
             
             # Clear VM configuration from workspace if workspace_id provided
             if workspace_id:
-                self._clear_workspace_vm_config(workspace_id)
+                self.vm_creator.clear_workspace_vm_config(user_id, workspace_id)
             
             logger.info(f"Successfully deleted VM {vm_name} for user {user_id}")
             return True
@@ -268,30 +274,6 @@ class SpotVMManager:
         except Exception as e:
             logger.error(f"Error listing all user VMs: {str(e)}")
             return []
-    
-    def _update_workspace_vm_config(self, workspace_id: str, vm_config: Dict):
-        """Update workspace with VM configuration"""
-        try:
-            # This would integrate with your workspace storage system
-            workspace = self.workspace_repo.get_by_id(workspace_id)
-            if workspace:
-                # Update workspace with VM details
-                workspace.vm_config = vm_config
-                self.workspace_repo.update(workspace)
-                logger.info(f"Updated workspace {workspace_id} with VM configuration")
-        except Exception as e:
-            logger.error(f"Error updating workspace {workspace_id} with VM config: {str(e)}")
-    
-    def _clear_workspace_vm_config(self, workspace_id: str):
-        """Clear VM configuration from workspace"""
-        try:
-            workspace = self.workspace_repo.get_by_id(workspace_id)
-            if workspace:
-                workspace.vm_config = None
-                self.workspace_repo.update(workspace)
-                logger.info(f"Cleared VM configuration from workspace {workspace_id}")
-        except Exception as e:
-            logger.error(f"Error clearing VM config from workspace {workspace_id}: {str(e)}")
     
     def monitor_spot_vm_health(self, user_id: str, workspace_id: str = None) -> Dict:
         """

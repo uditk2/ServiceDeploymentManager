@@ -143,7 +143,7 @@ def main():
         sys.exit(1)
     
     # Run test
-    success = True#test_vm_manager()
+    success = test_vm_manager()
     
     if success:
         logger.info("Test completed successfully!")

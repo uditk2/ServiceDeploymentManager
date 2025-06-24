@@ -6,6 +6,7 @@ from azure.mgmt.resource import ResourceManagementClient
 from typing import Dict, Optional, List
 import time
 import os
+import base64
 from azure.core.exceptions import ResourceNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,27 @@ class SpotVMCreator:
         self.compute_client = ComputeManagementClient(self.credential, subscription_id)
         self.network_client = NetworkManagementClient(self.credential, subscription_id)
         self.resource_client = ResourceManagementClient(self.credential, subscription_id)
+    
+    def _get_cloud_init_data(self) -> str:
+        """
+        Get cloud-init data for Docker installation
+        """
+        try:
+            # Get the cloud-init file path from the same directory as this module
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            cloud_init_path = os.path.join(current_dir, 'cloud-init-docker.yaml')
+            
+            if os.path.exists(cloud_init_path):
+                with open(cloud_init_path, 'r') as f:
+                    cloud_init_content = f.read()
+                # Encode as base64 for Azure VM custom data
+                return base64.b64encode(cloud_init_content.encode('utf-8')).decode('utf-8')
+            else:
+                logger.warning(f"Cloud-init file not found at {cloud_init_path}, VM will be created without Docker pre-installation")
+                raise ValueError(f"Failed to read cloud-init file: {e}")
+        except Exception as e:
+            logger.error(f"Error reading cloud-init file: {e}")
+            raise ValueError(f"Failed to read cloud-init file: {e}")
     
     def create_spot_vm(self, vm_name: str, vm_size: str = "Standard_B2s", 
                        admin_username: str = "azureuser", ssh_public_key: str = None) -> Dict:
@@ -65,13 +87,17 @@ class SpotVMCreator:
             if not subnet:
                 raise ValueError(f"Subnet {self.subnet_name} not found in virtual network {self.vnet_name}")
             
-            # Create network interface (without public IP)
+            # Create network interface with static private IP for Traefik consistency
+            # Generate a consistent static IP based on VM name for predictable routing
+            static_ip = self._generate_static_ip(vm_name, subnet)
+            
             nic_params = {
                 'location': self.location,
                 'ip_configurations': [{
                     'name': f"{vm_name}-ip-config",
                     'subnet': {'id': subnet.id},
-                    'private_ip_allocation_method': 'Dynamic'
+                    'private_ip_allocation_method': 'Static',
+                    'private_ip_address': static_ip
                 }]
             }
             
@@ -80,26 +106,31 @@ class SpotVMCreator:
                 self.resource_group, nic_name, nic_params
             ).result()
             
+            # Get cloud-init data for Docker installation
+            cloud_init_data = self._get_cloud_init_data()
+            
             # Create spot VM
             vm_params = {
                 'location': self.location,
                 'hardware_profile': {'vm_size': vm_size},
                 'storage_profile': {
-                    'image_reference': {
+                        'image_reference': {
                         'publisher': 'Canonical',
-                        'offer': '0001-com-ubuntu-server-focal',
-                        'sku': '20_04-lts-gen2',
+                        'offer': 'ubuntu-24_04-lts',
+                        'sku': 'server', ## We can check if there is a gen 2 image available              
                         'version': 'latest'
                     },
                     'os_disk': {
                         'create_option': 'FromImage',
-                        'managed_disk': {'storage_account_type': 'Premium_LRS'}
+                        'managed_disk': {'storage_account_type': 'Premium_LRS'},
+                        'delete_option': 'Delete' 
                     }
                 },
                 'os_profile': {
                     'computer_name': vm_name,
                     'admin_username': admin_username,
                     'disable_password_authentication': True,
+                    'custom_data': cloud_init_data,  # Add cloud-init data for Docker installation
                     'linux_configuration': {
                         'ssh': {
                             'public_keys': [{
@@ -110,7 +141,12 @@ class SpotVMCreator:
                     } if ssh_public_key else None
                 },
                 'network_profile': {
-                    'network_interfaces': [{'id': nic_result.id}]
+                    'network_interfaces': [{
+                        'id': nic_result.id,
+                        'properties': {                   
+                            'delete_option': 'Delete'
+                        }
+                    }],
                 },
                 'priority': 'Spot',
                 'eviction_policy': 'Deallocate',
@@ -288,20 +324,66 @@ class SpotVMCreator:
             logger.error(f"Error listing VMs: {str(e)}")
             return []
 
-    def update_workspace_table(self, workspace_id: str, vm_config: Dict):
+    def update_workspace_table(self, username: str, workspace_name: str, vm_config: Dict):
         """
-        Update workspace table with VM configuration
-        This method should be implemented based on your database/storage solution
+        Update workspace table with VM configuration including Docker context details
         """
-        # TODO: Implement based on your workspace storage (SQL, CosmosDB, etc.)
-        logger.info(f"Updating workspace {workspace_id} with VM config: {vm_config}")
+        try:
+            from app.repositories.workspace_repository import WorkspaceRepository
+            from app.models.workspace import VMConfig
+            
+            # Convert vm_config dict to VMConfig model with Docker context essentials
+            vm_config_model = VMConfig(
+                vm_name=vm_config.get('vm_name'),
+                vm_id=vm_config.get('vm_id'),
+                resource_group=vm_config.get('resource_group'),
+                location=vm_config.get('location'),
+                vm_size=vm_config.get('vm_size'),
+                private_ip=vm_config.get('private_ip'),  # Critical for Docker context
+                nic_id=vm_config.get('nic_id'),
+                vnet_name=vm_config.get('vnet_name'),
+                subnet_name=vm_config.get('subnet_name'),
+                status=vm_config.get('status'),
+                priority=vm_config.get('priority'),
+                created_at=vm_config.get('created_at'),
+                last_checked=None  # Will be updated during monitoring
+            )
+            
+            # Update workspace with VM configuration
+            import asyncio
+            if asyncio.iscoroutinefunction(WorkspaceRepository.update_workspace):
+                # Run async function in sync context
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    success = loop.run_until_complete(
+                        WorkspaceRepository.update_workspace(
+                            username=username,
+                            workspace_name=workspace_name,
+                            update_data={"vm_config": vm_config_model.dict()}
+                        )
+                    )
+                finally:
+                    loop.close()
+            else:
+                success = WorkspaceRepository.update_workspace(
+                    username=username,
+                    workspace_name=workspace_name,
+                    update_data={"vm_config": vm_config_model.dict()}
+                )
+            
+            if success:
+                logger.info(f"Successfully updated workspace {workspace_name} for user {username} with VM configuration")
+                logger.info(f"VM private IP: {vm_config.get('private_ip')} - ready for Docker context")
+            else:
+                logger.warning(f"Failed to update workspace {workspace_name} for user {username}")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error updating workspace table for {username}/{workspace_name}: {str(e)}")
+            return False
         
-        # Example implementation for a database update:
-        # from your_database_module import WorkspaceRepository
-        # workspace_repo = WorkspaceRepository()
-        # workspace_repo.update_vm_config(workspace_id, vm_config)
-        
-        pass
     
     def delete_spot_vm(self, vm_name: str):
         """Delete spot VM and associated resources"""
@@ -339,3 +421,125 @@ class SpotVMCreator:
         except Exception as e:
             logger.error(f"Error deleting VM {vm_name}: {str(e)}")
             raise
+    
+    def clear_workspace_vm_config(self, username: str, workspace_name: str):
+        """
+        Clear VM configuration from workspace table when VM is deleted
+        """
+        try:
+            from app.repositories.workspace_repository import WorkspaceRepository
+            
+            # Update workspace to clear VM configuration
+            import asyncio
+            if asyncio.iscoroutinefunction(WorkspaceRepository.update_workspace):
+                # Run async function in sync context
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    success = loop.run_until_complete(
+                        WorkspaceRepository.update_workspace(
+                            username=username,
+                            workspace_name=workspace_name,
+                            update_data={"vm_config": None}
+                        )
+                    )
+                finally:
+                    loop.close()
+            else:
+                success = WorkspaceRepository.update_workspace(
+                    username=username,
+                    workspace_name=workspace_name,
+                    update_data={"vm_config": None}
+                )
+            
+            if success:
+                logger.info(f"Successfully cleared VM configuration from workspace {workspace_name} for user {username}")
+            else:
+                logger.warning(f"Failed to clear VM configuration from workspace {workspace_name} for user {username}")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error clearing VM configuration from workspace for {username}/{workspace_name}: {str(e)}")
+            return False
+    
+    def _generate_static_ip(self, vm_name: str, subnet) -> str:
+        """
+        Generate a consistent static IP address for a VM within the subnet range
+        This ensures Traefik can always route to the same IP for the same VM
+        """
+        import hashlib
+        import ipaddress
+        
+        try:
+            # Parse subnet CIDR to get available IP range
+            subnet_cidr = subnet.address_prefix
+            network = ipaddress.IPv4Network(subnet_cidr, strict=False)
+            
+            # Get the available host IPs (excluding network and broadcast)
+            available_ips = list(network.hosts())
+            
+            # Reserve first few IPs for infrastructure (gateway, DNS, etc.)
+            # Azure typically reserves the first 4 IPs in a subnet
+            start_index = 10  # Start from .10 to be safe
+            available_ips = available_ips[start_index:]
+            
+            # Generate a hash from VM name for consistency
+            vm_hash = hashlib.md5(vm_name.encode()).hexdigest()
+            
+            # Convert hash to integer and use modulo to get index
+            hash_int = int(vm_hash[:8], 16)  # Use first 8 hex chars
+            ip_index = hash_int % len(available_ips)
+            
+            selected_ip = str(available_ips[ip_index])
+            
+            logger.info(f"Generated static IP {selected_ip} for VM {vm_name} in subnet {subnet_cidr}")
+            return selected_ip
+            
+        except Exception as e:
+            logger.error(f"Error generating static IP for VM {vm_name}: {str(e)}")
+            # Fallback: generate a simple static IP based on VM name hash
+            vm_hash = hashlib.md5(vm_name.encode()).hexdigest()
+            hash_int = int(vm_hash[:4], 16)  # Use first 4 hex chars
+            # Assume subnet is 10.0.0.0/24 and use .100+ range
+            ip_suffix = 100 + (hash_int % 155)  # Gives range 100-254
+            fallback_ip = f"10.0.0.{ip_suffix}"
+            logger.warning(f"Using fallback static IP {fallback_ip} for VM {vm_name}")
+            return fallback_ip
+        
+    def ensure_static_ip(self, vm_name: str) -> bool:
+        """
+        Ensure an existing VM has a static IP for Traefik routing consistency
+        Returns True if IP is already static or successfully converted to static
+        """
+        try:
+            nic_name = f"{vm_name}-nic"
+            nic_info = self.network_client.network_interfaces.get(
+                self.resource_group, nic_name
+            )
+            
+            ip_config = nic_info.ip_configurations[0]
+            current_ip = ip_config.private_ip_address
+            allocation_method = ip_config.private_ip_allocation_method
+            
+            if allocation_method == 'Static':
+                logger.info(f"VM {vm_name} already has static IP: {current_ip}")
+                return True
+            
+            logger.info(f"Converting VM {vm_name} from dynamic to static IP: {current_ip}")
+            
+            # Update the NIC to use static allocation with the current IP
+            ip_config.private_ip_allocation_method = 'Static'
+            ip_config.private_ip_address = current_ip
+            
+            # Update the network interface
+            self.network_client.network_interfaces.begin_create_or_update(
+                self.resource_group, nic_name, nic_info
+            ).result()
+            
+            logger.info(f"Successfully converted VM {vm_name} to static IP: {current_ip}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error ensuring static IP for VM {vm_name}: {str(e)}")
+            return False

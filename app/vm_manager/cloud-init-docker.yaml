@@ -1,0 +1,54 @@
+#cloud-config
+
+# Cloud-init script for setting up Docker on new VMs
+# This script is automatically executed when the VM boots for the first time
+
+# Update the system and install required packages
+package_update: true
+package_upgrade: true
+
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+
+# Use runcmd for Docker installation commands
+runcmd:
+  # Add Docker's official GPG key
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+  
+  # Add Docker repository
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  
+  # Update package index
+  - apt-get update
+  
+  # Install Docker packages
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  
+  # Start and enable Docker service
+  - systemctl start docker
+  - systemctl enable docker
+  
+  # Add azureuser to docker group
+  - usermod -aG docker azureuser
+  
+  # Set proper permissions on Docker socket
+  - chmod 666 /var/run/docker.sock || true
+
+# Optional: Create a file to verify cloud-init ran
+write_files:
+  - path: /tmp/cloud-init-complete
+    content: |
+      Cloud-init completed at: $(date)
+      Docker installation attempted
+    permissions: '0644'
+
+# Reboot to ensure all group changes take effect
+power_state:
+  mode: reboot
+  delay: "+1"
+  timeout: 30
+  condition: true
