@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     apt-transport-https \
     ca-certificates \
+    openssh-client \
     && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
@@ -59,6 +60,16 @@ RUN groupadd -g 999 docker && \
 # Copy SSH private key for VM connections
 COPY spot_vm_key.pem /app/ssh/spot_vm_key.pem
 RUN chmod 600 /app/ssh/spot_vm_key.pem && chown appuser:appuser /app/ssh/spot_vm_key.pem
+
+# Set up SSH configuration for the appuser
+RUN mkdir -p /home/appuser/.ssh && \
+    echo "Host *" > /home/appuser/.ssh/config && \
+    echo "    IdentityFile /app/ssh/spot_vm_key.pem" >> /home/appuser/.ssh/config && \
+    echo "    IdentitiesOnly yes" >> /home/appuser/.ssh/config && \
+    echo "    StrictHostKeyChecking no" >> /home/appuser/.ssh/config && \
+    echo "    UserKnownHostsFile /dev/null" >> /home/appuser/.ssh/config && \
+    chmod 600 /home/appuser/.ssh/config && \
+    chown -R appuser:appuser /home/appuser/.ssh
 
 
 USER appuser

@@ -4,59 +4,67 @@ from pathlib import Path
 
 class TraefikTomlGenerator:
     def __init__(self, base_url=None):
-        self.base_url = base_url or os.getenv('BASE_URL', 'localhost')
+        self.base_url = base_url or os.getenv('SUBDOMAIN', 'localhost')
+        self.base_location =  os.getenv('TRAFFIC_TOML_LOCATION')
     
-    def generate_toml(self, service_name, directory_path, private_ip, port=80):
+    def generate_toml(self, service_name, private_ip, service_ports={}):
         """
         Generate a TOML configuration file for Traefik dynamic configuration.
         
         Args:
             service_name (str): Name of the service
-            directory_path (str): Directory where TOML file will be created
             private_ip (str): Private IP address of the service
-            port (int): Service port (default: 80)
+            service_ports (dict): Dictionary of service ports
         """
-        config = {
-            "http": {
-            "routers": {
-                f"{service_name}": {
-                "rule": f"Host(`{service_name}.{self.base_url}`)",
-                "service": f"{service_name}",
-                "entryPoints": ["websecure"],
-                "middlewares": ["sslheader"],
-                "tls": {
-                    "certResolver": "letsencrypt"
+        routers = {}
+        services = {}
+        final_urls = []
+        for service, ports in service_ports.items():
+            multiport = len(ports) > 1
+            index=1
+            for port in ports:
+                suffix= str(index) if multiport else ''
+                index += 1                 
+                router_name = f"{service_name}-{service}{suffix}"
+                service_entry_name = f"{service_name}-{service}{suffix}"
+                url = f"{service_entry_name}.{self.base_url}"
+                final_urls.append(url)
+                routers[router_name] = {
+                    "rule": f"Host(`{url}`)",
+                    "service": service_entry_name,
+                    "entryPoints": ["websecure"],
+                    "middlewares": ["sslheader"],
+                    "tls": {"certResolver": "letsencrypt"}
                 }
-                }
-            },
-            "middlewares": {
-                "sslheader": {
-                "headers": {
-                    "customRequestHeaders": {
-                    "X-Forwarded-Proto": "https"
+                services[service_entry_name] = {
+                    "loadBalancer": {
+                        "servers": [
+                            {"url": f"http://{private_ip}:{port}"}
+                        ]
                     }
                 }
-                }
-            },
-            "services": {
-                f"{service_name}": {
-                "loadBalancer": {
-                    "servers": [
-                    {"url": f"http://{private_ip}:{port}"}
-                    ]
-                }
-                }
-            }
+        config = {
+            "http": {
+                "routers": routers,
+                "middlewares": {
+                    "sslheader": {
+                        "headers": {
+                            "customRequestHeaders": {
+                                "X-Forwarded-Proto": "https"
+                            }
+                        }
+                    }
+                },
+                "services": services
             }
         }
         
         # Ensure directory exists
-        Path(directory_path).mkdir(parents=True, exist_ok=True)
-        
+        Path(self.base_location).mkdir(parents=True, exist_ok=True)
+
         # Write TOML file
-        toml_file_path = Path(directory_path) / f"{service_name}.toml"
+        toml_file_path = Path(self.base_location) / f"{service_name}.toml"
         with open(toml_file_path, 'w') as f:
             toml.dump(config, f)
         
-        return str(toml_file_path)
-        
+        return toml_file_path, final_urls

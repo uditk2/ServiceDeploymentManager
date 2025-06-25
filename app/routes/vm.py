@@ -53,14 +53,14 @@ async def run_ensure_vm_job(username: str, workspace_name: str, job_id: str):
         # Update job status to running
         await JobRepository.update_job_status(job_id, "running")
 
-        # Run VM manager synchronously in thread executor
         manager = SpotVMManager()
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            manager.ensure_user_vm,
-            username,
-            workspace_name
+        # Use the async allocation method directly
+        result = await manager.allocate_or_reuse_vm(
+            user_id=username,
+            workspace_id=workspace_name,
+            vm_name=None,
+            vm_size=None,
+            force_recreate=False
         )
 
         # Update job as completed with VM result

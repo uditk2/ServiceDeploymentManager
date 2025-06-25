@@ -8,6 +8,7 @@ from typing import Dict, Optional
 from pydantic import BaseModel
 
 from app.docker.docker_compose_utils import DockerComposeUtils
+from app.docker.docker_compose_remote_vm_utils import DockerComposeRemoteVMUtils
 from app.docker.helper_functions import generate_unique_name
 from app.docker.utils import DockerUtils
 from app.docker.zip_utils import ZipUtils
@@ -107,7 +108,7 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
         )
         workspace = await WorkspaceController.get_workspace(username, workspace_name)
         # Build the Docker image
-        command_result = DockerComposeUtils.run_docker_compose_down(workspace.workspace_path, username)
+        command_result = await DockerComposeRemoteVMUtils.run_docker_compose_down(workspace.workspace_path, username, workspace_name=workspace.workspace_name)
         if command_result is None:
             command_result = CommandResult(success=False, error="Command returned None result")
             
@@ -118,7 +119,7 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
                 "command_result": command_result.to_dict()
             }
         )
-        command_result = DockerComposeUtils.run_docker_compose_build(workspace.workspace_path, username)
+        command_result = await DockerComposeRemoteVMUtils.run_docker_compose_build(workspace.workspace_path, username, workspace_name=workspace.workspace_name)
         if command_result is None:
             command_result = CommandResult(success=False, error="Command returned None result")
             
@@ -130,7 +131,7 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
             }
         )
         # Start the Docker container
-        command_result = DockerComposeUtils.run_docker_compose_deploy(workspace.workspace_path, username)
+        command_result = await DockerComposeRemoteVMUtils.run_docker_compose_deploy(workspace.workspace_path, username, workspace_name=workspace.workspace_name)
         if command_result is None:
             command_result = CommandResult(success=False, error="Command returned None result")
             
@@ -170,8 +171,8 @@ async def cleanup_workspace(username: str, workspace_name: str):
             raise HTTPException(status_code=404, detail=f"Workspace {workspace_name} not found for user {username}")
         
         logger.info(f"Starting cleanup for workspace {username}/{workspace_name}")
-        cleanup_result = DockerComposeUtils.run_docker_compose_cleanup(workspace.workspace_path, username)
-        
+        cleanup_result = await DockerComposeRemoteVMUtils.run_docker_compose_cleanup(workspace.workspace_path, username=username, workspace_name=workspace_name)
+
         if cleanup_result.success:
             return {
                 "status": "success",
@@ -201,7 +202,7 @@ async def system_cleanup():
     """
     try:
         logger.info("Starting system-wide Docker cleanup")
-        cleanup_result = DockerComposeUtils.run_system_cleanup()
+        cleanup_result = DockerComposeRemoteVMUtils.run_system_cleanup()
         
         if cleanup_result.success:
             return {
@@ -306,7 +307,7 @@ async def run_build_job(username: str, workspace_name: str, job_id: str, temp_fi
         workspace = await WorkspaceController.get_workspace(username, workspace_name)
         
         # Build the Docker image
-        command_result = DockerComposeUtils.run_docker_compose_build(workspace.workspace_path, username)
+        command_result = await DockerComposeRemoteVMUtils.run_docker_compose_build(workspace.workspace_path, username, workspace_name=workspace_name)
         if command_result is None:
             command_result = CommandResult(success=False, error="Command returned None result")
             

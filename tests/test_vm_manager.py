@@ -65,7 +65,7 @@ def test_vm_manager():
         
         # Step 2: Ensure VM is available
         logger.info("Step 2: Ensuring VM is available...")
-        result = vm_manager.ensure_user_vm(
+        result = vm_manager.allocate_or_reuse_vm(
             user_id=test_user,
             workspace_id=test_workspace,
             vm_size="Standard_B2ats_v2"  # Small size for testing
@@ -128,7 +128,7 @@ def cleanup_test_vm():
         test_user = "uditk2@gmail.com"
         test_workspace = "BasePythonWebApp"
         
-        result = vm_manager.delete_user_vm(test_user, test_workspace)
+        result = vm_manager.delete_user_vm_sync(test_user, test_workspace)
         logger.info(f"Cleanup result: {result}")
         
     except Exception as e:

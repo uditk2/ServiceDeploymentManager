@@ -26,13 +26,13 @@ class Colors:
 # Configuration
 LOCAL = "http://localhost:8005"
 API_BASE_URL = os.getenv('API_BASE_URL', LOCAL)
-VM_API_URL = f"{API_BASE_URL}/api/vm"
+VM_API_URL = f"{API_BASE_URL}/api/vm/ensure"
 JOB_API_URL = f"{API_BASE_URL}/api/jobs"
 WORKSPACE_API_URL = f"{API_BASE_URL}/api/workspaces"
 
 # Test parameters
-test_user = os.getenv('TEST_USERNAME', 'uditk2@gmail.com')
-test_workspace = os.getenv('TEST_WORKSPACE', 'BasePythonWebApp')
+test_user = 'uditk2@gmail.com'
+test_workspace = 'BasePythonWebApp'
 AUTH_TOKEN = os.getenv('AUTH_TOKEN')
 HEADERS = {'Accept': 'application/json', 'Authorization': AUTH_TOKEN} if AUTH_TOKEN else {'Accept': 'application/json'}
 
@@ -74,8 +74,10 @@ def wait_for_job(job_id):
 
 def test_vm_api():
     print_header("Testing VM ensure job API")
+    print(f"Using URL: {VM_API_URL}/{test_user}/{test_workspace}")
+    print(f"Headers: {HEADERS}")
     # Trigger ensure VM job
-    url = f"{VM_API_URL}/ensure/{test_user}/{test_workspace}"
+    url = f"{VM_API_URL}/{test_user}/{test_workspace}"
     resp = requests.post(url, headers=HEADERS)
     if resp.status_code != 200:
         print_failure(f"Failed to trigger VM job: {resp.status_code} - {resp.text}")

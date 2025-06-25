@@ -33,3 +33,4 @@ azure-mgmt-resource>=22.0.0
 
 # Retry functionality
 retrying
+toml

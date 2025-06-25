@@ -2,6 +2,7 @@ import logging
 import os
 from typing import Dict, Optional, List
 import time
+import asyncio
 from .spot_vm_creator import SpotVMCreator
 from .config import AzureVMConfig
 from app.repositories.workspace_repository import WorkspaceRepository
@@ -70,90 +71,68 @@ class SpotVMManager:
             logger.error(f"Error checking if VM {vm_name} is running: {str(e)}")
             return False
     
-    def ensure_user_vm(self, user_id: str, workspace_id: str = None, 
-                       vm_size: str = "Standard_B2ats_v2", force_recreate: bool = False) -> Dict:
-        """
-        Ensure a user has a running spot VM. Create one if it doesn't exist or start if stopped.
-        
-        Args:
-            user_id: The user identifier
-            workspace_id: Optional workspace identifier for VM naming
-            vm_size: Azure VM size (default: Standard_B2s)
-            force_recreate: If True, delete existing VM and create a new one
-            
-        Returns:
-            Dict containing VM configuration and status
-        """
-        try:
+    async def allocate_or_reuse_vm(self, user_id, workspace_id=None, vm_name=None, vm_size=None, force_recreate=False):
+        # Generate vm_name if not provided
+        if not vm_name:
             vm_name = self.get_user_vm_name(user_id, workspace_id)
             
-            # Check if VM already exists
-            existing_vm = self.check_user_vm_allocation(user_id, workspace_id)
+        # Set default vm_size if not provided
+        if not vm_size:
+            vm_size = "Standard_B2ats_v2"
             
-            if existing_vm and not force_recreate:
-                logger.info(f"VM {vm_name} already exists for user {user_id}")
-                
-                # Check if VM is running
-                if self.is_vm_running(vm_name):
-                    logger.info(f"VM {vm_name} is already running")
-                    # Update workspace with current VM details
+        # Check if VM already exists
+        existing_vm = self.check_user_vm_allocation(user_id, workspace_id)
+        if existing_vm and not force_recreate:
+            logger.info(f"VM {vm_name} already exists for user {user_id}")
+            # Check if VM is running
+            if self.is_vm_running(vm_name):
+                logger.info(f"VM {vm_name} is already running")
+                # Update workspace with current VM details
+                if workspace_id:
+                    await self.vm_creator.update_workspace_table(user_id, workspace_id, existing_vm)
+                return {
+                    'status': 'running',
+                    'vm_config': existing_vm,
+                    'action_taken': 'none'
+                }
+            else:
+                logger.info(f"VM {vm_name} exists but is not running. Starting...")
+                # Try to start the existing VM
+                if self.vm_creator.start_vm(vm_name):
+                    updated_vm = self.vm_creator.get_vm_details(vm_name)
+                    # Update workspace with restarted VM details
                     if workspace_id:
-                        self.vm_creator.update_workspace_table(user_id, workspace_id, existing_vm)
+                        await self.vm_creator.update_workspace_table(user_id, workspace_id, updated_vm)
                     return {
                         'status': 'running',
-                        'vm_config': existing_vm,
-                        'action_taken': 'none'
+                        'vm_config': updated_vm,
+                        'action_taken': 'started'
                     }
                 else:
-                    logger.info(f"VM {vm_name} exists but is not running. Starting...")
-                    
-                    # Try to start the existing VM
-                    if self.vm_creator.start_vm(vm_name):
-                        updated_vm = self.vm_creator.get_vm_details(vm_name)
-                        # Update workspace with restarted VM details
-                        if workspace_id:
-                            self.vm_creator.update_workspace_table(user_id, workspace_id, updated_vm)
-                        return {
-                            'status': 'running',
-                            'vm_config': updated_vm,
-                            'action_taken': 'started'
-                        }
-                    else:
-                        logger.warning(f"Failed to start existing VM {vm_name}. Will create new one.")
-                        # Delete the problematic VM and create a new one
-                        self.vm_creator.delete_spot_vm(vm_name)
-                        time.sleep(30)  # Wait for deletion to complete
-            
-            elif force_recreate and existing_vm:
-                logger.info(f"Force recreating VM {vm_name} for user {user_id}")
-                self.vm_creator.delete_spot_vm(vm_name)
-                time.sleep(30)  # Wait for deletion to complete
-            
-            # Create a new VM
-            logger.info(f"Creating new spot VM {vm_name} for user {user_id}")
-            
-            # Validate configuration before creating VM
-            self.config.validate()
-            
-            vm_config = self.vm_creator.create_spot_vm(
-                vm_name=vm_name,
-                vm_size=vm_size,
-                admin_username=self.config.admin_username
-            )
-            
-            # Update workspace with VM configuration if workspace_id provided
-            if workspace_id:
-                self.vm_creator.update_workspace_table(user_id, workspace_id, vm_config)
-            
-            return {
-                'status': 'running',
-                'vm_config': vm_config,
-                'action_taken': 'created'
-            }
-            
-        except Exception as e:
-            logger.error(f"Error ensuring VM for user {user_id}: {str(e)}")
-            raise
+                    logger.warning(f"Failed to start existing VM {vm_name}. Will create new one.")
+                    self.vm_creator.delete_spot_vm(vm_name)
+                    time.sleep(30)  # Wait for deletion to complete
+        elif force_recreate and existing_vm:
+            logger.info(f"Force recreating VM {vm_name} for user {user_id}")
+            self.vm_creator.delete_spot_vm(vm_name)
+            time.sleep(30)  # Wait for deletion to complete
+        # Create a new VM
+        logger.info(f"Creating new spot VM {vm_name} for user {user_id}")
+        # Validate configuration before creating VM
+        self.config.validate()
+        vm_config = self.vm_creator.create_spot_vm(
+            vm_name=vm_name,
+            vm_size=vm_size,
+            admin_username=self.config.admin_username
+        )
+        # Update workspace with VM configuration if workspace_id provided
+        if workspace_id:
+            await self.vm_creator.update_workspace_table(user_id, workspace_id, vm_config)
+        return {
+            'status': 'running',
+            'vm_config': vm_config,
+            'action_taken': 'created'
+        }
     
     def deallocate_user_vm(self, user_id: str, workspace_id: str = None) -> bool:
         """
@@ -181,7 +160,14 @@ class SpotVMManager:
             logger.error(f"Error deallocating VM for user {user_id}: {str(e)}")
             return False
     
-    def delete_user_vm(self, user_id: str, workspace_id: str = None) -> bool:
+    def delete_user_vm_sync(self, user_id: str, workspace_id: str = None) -> bool:
+        """
+        Synchronous wrapper for delete_user_vm for compatibility with existing code
+        """
+        import asyncio
+        return asyncio.run(self.delete_user_vm(user_id, workspace_id))
+
+    async def delete_user_vm(self, user_id: str, workspace_id: str = None) -> bool:
         """
         Completely delete a user's spot VM and associated resources
         """
@@ -198,7 +184,7 @@ class SpotVMManager:
             
             # Clear VM configuration from workspace if workspace_id provided
             if workspace_id:
-                self.vm_creator.clear_workspace_vm_config(user_id, workspace_id)
+                await self.vm_creator.clear_workspace_vm_config(user_id, workspace_id)
             
             logger.info(f"Successfully deleted VM {vm_name} for user {user_id}")
             return True
@@ -333,3 +319,15 @@ class SpotVMManager:
                 'error': str(e),
                 'action_required': 'investigate'
             }
+    
+    def ensure_user_vm(self, user_id: str, workspace_id: str = None, vm_size: str = None, force_recreate: bool = False):
+        """
+        Synchronous wrapper for allocate_or_reuse_vm for compatibility with existing code
+        """
+        import asyncio
+        return asyncio.run(self.allocate_or_reuse_vm(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            vm_size=vm_size,
+            force_recreate=force_recreate
+        ))

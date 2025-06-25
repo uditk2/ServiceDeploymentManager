@@ -14,7 +14,7 @@ class DockerComposeUtils():
     @staticmethod
     def run_docker_compose_down(project_path, user_id)->CommandResult:
         os.chdir(project_path)
-        container_name = generate_unique_name(project_base_path=project_path, user_id=user_id)
+        container_name = generate_unique_name(project_base_path=project_path, username=user_id)
         try:
             cmd =  f'docker compose -p {container_name} down'
             return DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(cmd, container_name=container_name)
@@ -26,7 +26,7 @@ class DockerComposeUtils():
     @staticmethod
     def run_docker_compose_build(project_path, user_id)->CommandResult:
         os.chdir(project_path)
-        container_name = generate_unique_name(project_base_path=project_path, user_id=user_id)
+        container_name = generate_unique_name(project_base_path=project_path, username=user_id)
         try:
             compose_file, _ = DockerComposeUtils.generate_docker_compose_file(project_path=project_path, container_name=container_name)
             cmd =  DockerComposeUtils.generate_build_command(
@@ -156,7 +156,7 @@ class DockerComposeUtils():
         
     @staticmethod
     def run_docker_compose_deploy(project_path, user_id, env_file_path=None):
-        container_name = generate_unique_name(project_base_path=project_path, user_id=user_id)
+        container_name = generate_unique_name(project_base_path=project_path, username=user_id)
         env_file_arg = ""
         if env_file_path is not None:
             env_file_arg = f"--env-file {env_file_path}"
@@ -399,7 +399,7 @@ class DockerComposeUtils():
             CommandResult indicating success/failure of cleanup operations
         """
         os.chdir(project_path)
-        container_name = generate_unique_name(project_base_path=project_path, user_id=user_id)
+        container_name = generate_unique_name(project_base_path=project_path, username=user_id)
         
         try:
             # Only clean up resources specific to this project

@@ -316,7 +316,7 @@ class DockerStats:
         """
         try:
             # Generate unique container name based on username and workspace
-            container_name = generate_unique_name(project_base_path=workspace_path, user_id=username)
+            container_name = generate_unique_name(project_base_path=workspace_path, username=username)
             
             # Get statistics for this compose stack
             stats_result = DockerStats.get_compose_stack_stats(container_name)

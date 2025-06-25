@@ -8,8 +8,10 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/azureuser/service/logs:/app/logs
+      - /home/azureuser/remote:/app/watcher
       - /home/azureuser/ws/.env:/app/.env
       - /home/azureuser/deployments:/app/docker/deployments
+      - /home/azureuser/assets/traefik:/app/traefik
     environment:
       - ENV=production
       - FLASK_ENV=production
@@ -38,14 +40,17 @@ services:
     networks:
       - backend-network
       - traefik-public
+    depends_on:
+      redis:
+        condition: service_started
+      fluentd:
+        condition: service_healthy
+    # Fluentd logging configuration
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: fluentd:24224
+        fluentd-address: 10.1.0.4:24224
         tag: internal.production.deployment-manager
-    depends_on:
-      - redis
-      - fluentd
   
   redis:
     image: redis:alpine
@@ -60,12 +65,18 @@ services:
     image: fluent/fluentd:v1.16-1
     platform: linux/amd64
     container_name: fluentd-prod
+    healthcheck:
+      test: ["CMD", "nc", "-z", "10.1.0.4", "24224"]
+      interval: 10s      # Less frequent checks (every 10s instead of 5s)
+      timeout: 3s
+      retries: 5         # Fewer retries (3 instead of 6)
+      start_period: 15s  # Longer initial wait
     ports:
       - "24224:24224"
       - "24224:24224/udp"
     volumes:
-      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
-      - /home/azureuser/deployments:/fluentd/log
+      - /home/azureuser/ws/fluentd/fluent.conf:/fluentd/etc/fluent.conf
+      - /home/azureuser/remote:/fluentd/log
       - /home/azureuser/service:/fluentd/internal/log
     networks:
       - backend-network

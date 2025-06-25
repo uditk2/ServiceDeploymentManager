@@ -13,7 +13,7 @@ class DockerUtils():
 
     @staticmethod
     def is_container_present(project_path, user_id) -> Optional[bool]:
-        container_name = generate_unique_name(project_base_path=project_path, user_id=user_id)
+        container_name = generate_unique_name(project_base_path=project_path, username=user_id)
         check_cmd = f'docker ps -a --filter name=^/{container_name}$ --format "{{{{.Names}}}}"'
         check_result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(check_cmd, container_name=container_name)
         if not check_result.success or not check_result.output.strip():
@@ -77,7 +77,7 @@ class DockerUtils():
         if os.path.exists(endpoint_file):
             with open(endpoint_file, 'r') as f:
                 return f.read().strip
-        return generate_unique_name(project_base_path=project_path, user_id=user_id) + f".{DockerConfig.BASE_DOMAIN}"
+        return generate_unique_name(project_base_path=project_path, username=user_id) + f".{DockerConfig.BASE_DOMAIN}"
 
     @staticmethod
     def get_service_paths(project_path, only_compose=False):

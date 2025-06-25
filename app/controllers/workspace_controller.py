@@ -3,6 +3,7 @@ from app.models.workspace import UserWorkspace
 from app.repositories.workspace_repository import WorkspaceRepository
 from app.docker.zip_utils import ZipUtils
 from app.docker.docker_compose_utils import DockerComposeUtils
+from app.docker.docker_compose_remote_vm_utils import DockerComposeRemoteVMUtils
 import os
 import tempfile
 import shutil
@@ -58,10 +59,15 @@ class WorkspaceController:
     async def delete_workspace(username: str, workspace_name: str) -> Dict:
         """Delete a workspace and its resources"""
         try:
+            logger.info(f"Starting workspace deletion for: {username}/{workspace_name}")
             # Get workspace details first
             workspace = await WorkspaceRepository.get_workspace(username, workspace_name)
             if not workspace:
                 raise ValueError(f"Workspace {workspace_name} not found for user {username}")
+
+            logger.info(f"Found workspace with VM config: {workspace.vm_config is not None}")
+            if workspace.vm_config:
+                logger.info(f"VM config details - IP: {workspace.vm_config.private_ip}, Status: {workspace.vm_config.status}")
 
             # Stop any active log watchers for this workspace
             try:
@@ -81,10 +87,12 @@ class WorkspaceController:
 
             # Stop and remove any running containers
             try:
-                # Try docker-compose down first
-                result = DockerComposeUtils.run_docker_compose_down(
+                # Use remote VM utils for workspaces with VM configuration
+                logger.info(f"Using remote VM Docker compose down for workspace: {username}/{workspace_name}")
+                result = await DockerComposeRemoteVMUtils.run_docker_compose_down(
                     project_path=workspace.workspace_path,
-                    user_id=username
+                    username=username,
+                    workspace_name=workspace_name
                 )
                 if not result.success:
                     logger.warning(f"Docker compose down failed: {result.error}")
