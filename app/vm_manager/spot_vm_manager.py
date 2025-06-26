@@ -6,7 +6,9 @@ import asyncio
 from .spot_vm_creator import SpotVMCreator
 from .config import AzureVMConfig
 from app.repositories.workspace_repository import WorkspaceRepository
-
+from app.models.results.vm_operation_results import VMInfoResult
+from app.models.workspace import VMConfig
+from app.models.exceptions.known_exceptions import VMNotFoundException, VMInfoNotAvailableException
 logger = logging.getLogger(__name__)
 
 class SpotVMManager:
@@ -31,16 +33,16 @@ class SpotVMManager:
         # Initialize workspace repository for tracking VM allocations
         self.workspace_repo = WorkspaceRepository()
     
-    def get_user_vm_name(self, user_id: str, workspace_id: str = None) -> str:
+    def get_user_vm_name(self, user_id: str, workspace_id: str = None, use_workspace=False) -> str:
         """Generate a consistent VM name for a user"""
         # Clean user ID for VM naming (remove special characters)
         clean_user_id = ''.join(c for c in user_id if c.isalnum() or c == '-').lower()
-        if workspace_id:
+        if workspace_id and use_workspace:
             clean_workspace_id = ''.join(c for c in workspace_id if c.isalnum() or c == '-').lower()
             return f"vm-{clean_user_id}-{clean_workspace_id}"[:64]  # Azure VM name limit
         return f"vm-{clean_user_id}"[:64]
     
-    def check_user_vm_allocation(self, user_id: str, workspace_id: str = None) -> Optional[Dict]:
+    def check_user_vm_allocation(self, user_id: str, workspace_id: str = None) -> Optional[VMConfig]:
         """
         Check if a user has a spot VM allocated
         Returns VM details if allocated, None otherwise
@@ -57,7 +59,9 @@ class SpotVMManager:
             else:
                 logger.info(f"No VM allocation found for user {user_id}")
                 return None
-                
+        except VMNotFoundException:
+            logger.info(f"VM {vm_name} not found for user {user_id}")
+            return None
         except Exception as e:
             logger.error(f"Error checking VM allocation for user {user_id}: {str(e)}")
             return None
@@ -67,6 +71,8 @@ class SpotVMManager:
         try:
             status = self.vm_creator.get_vm_status(vm_name)
             return status == 'running'
+        except VMNotFoundException as e:
+            raise e
         except Exception as e:
             logger.error(f"Error checking if VM {vm_name} is running: {str(e)}")
             return False
@@ -90,11 +96,11 @@ class SpotVMManager:
                 # Update workspace with current VM details
                 if workspace_id:
                     await self.vm_creator.update_workspace_table(user_id, workspace_id, existing_vm)
-                return {
-                    'status': 'running',
-                    'vm_config': existing_vm,
-                    'action_taken': 'none'
-                }
+                return VMInfoResult(
+                    ip=existing_vm.private_ip,
+                    vm_status=existing_vm.status,
+                    vm_name=existing_vm.vm_name
+                )
             else:
                 logger.info(f"VM {vm_name} exists but is not running. Starting...")
                 # Try to start the existing VM
@@ -103,11 +109,11 @@ class SpotVMManager:
                     # Update workspace with restarted VM details
                     if workspace_id:
                         await self.vm_creator.update_workspace_table(user_id, workspace_id, updated_vm)
-                    return {
-                        'status': 'running',
-                        'vm_config': updated_vm,
-                        'action_taken': 'started'
-                    }
+                    return  VMInfoResult(
+                        ip=updated_vm.private_ip,
+                        vm_name=updated_vm.vm_name,
+                        vm_status=updated_vm.status
+                    )
                 else:
                     logger.warning(f"Failed to start existing VM {vm_name}. Will create new one.")
                     self.vm_creator.delete_spot_vm(vm_name)
@@ -128,11 +134,11 @@ class SpotVMManager:
         # Update workspace with VM configuration if workspace_id provided
         if workspace_id:
             await self.vm_creator.update_workspace_table(user_id, workspace_id, vm_config)
-        return {
-            'status': 'running',
-            'vm_config': vm_config,
-            'action_taken': 'created'
-        }
+        return VMInfoResult(
+            ip=vm_config.private_ip,
+            vm_name=vm_config.vm_name,
+            vm_status=vm_config.status
+        )
     
     def deallocate_user_vm(self, user_id: str, workspace_id: str = None) -> bool:
         """

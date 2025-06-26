@@ -2,6 +2,12 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from typing import List, Optional
 from app.models.workspace import UserWorkspace
 from app.controllers.workspace_controller import WorkspaceController
+from app.models.exceptions.known_exceptions import (
+    WorkspaceCreationFailedException,
+    WorkspaceUpdateFailedException,
+    WorkspaceNotFoundException,
+    WorkspaceUploadFailedException
+)
 
 router = APIRouter(
     prefix="/api/workspaces",
@@ -13,7 +19,7 @@ async def create_workspace(workspace: UserWorkspace):
     """Create a new user workspace"""
     try:
         return await WorkspaceController.create_workspace(workspace)
-    except ValueError as e:
+    except WorkspaceCreationFailedException as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -41,7 +47,7 @@ async def update_workspace(username: str, workspace_name: str, data: dict):
     """Update an existing workspace"""
     try:
         return await WorkspaceController.update_workspace(username, workspace_name, data)
-    except ValueError as e:
+    except WorkspaceUpdateFailedException as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -51,7 +57,7 @@ async def delete_workspace(username: str, workspace_name: str):
     """Delete a workspace"""
     try:
         return await WorkspaceController.delete_workspace(username, workspace_name)
-    except ValueError as e:
+    except (ValueError, WorkspaceNotFoundException) as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -75,7 +81,7 @@ async def upload_workspace(
             zip_file=zip_file,
             docker_image_name=docker_image_name
         )
-    except ValueError as e:
+    except WorkspaceUploadFailedException as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -9,7 +9,7 @@ from app.custom_logging import logger
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # List of public paths that do not require authentication
-        public_paths = ['/', '/health']
+        public_paths = ['/', '/health', '/docs', '/openapi.json']
         if request.url.path in public_paths:
             return await call_next(request)
         auth_token = os.getenv("AUTH_TOKEN")

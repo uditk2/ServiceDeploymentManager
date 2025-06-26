@@ -51,7 +51,11 @@ class ServiceDeploymentManagerClient:
         self.workspaces_api_url = f"{self.base_url}/api/workspaces"
     
     def _get_auth_headers(self) -> Dict[str, str]:
-        """Generate Basic Authentication headers."""
+        """Generate Authorization header for custom token auth."""
+        token = os.getenv('AUTH_TOKEN')
+        if token:
+            return {"Authorization": token}
+        # fallback to basic auth for legacy
         credentials = f"{self.username}:{self.password}"
         encoded_credentials = base64.b64encode(credentials.encode()).decode()
         return {"Authorization": f"Basic {encoded_credentials}"}

@@ -1,6 +1,8 @@
 from typing import List, Optional, Dict
 from app.database import user_workspace_collection
-from app.models.workspace import UserWorkspace, LogWatcherInfo
+from app.models.workspace import UserWorkspace, LogWatcherInfo, VMConfig
+from app.models.exceptions.known_exceptions import (
+    WorkspaceAlreadyExistsException)
 from datetime import datetime
 import re
 
@@ -10,7 +12,7 @@ class WorkspaceRepository:
     @staticmethod
     async def create_workspace(workspace: UserWorkspace) -> str:
         """Create a new workspace"""
-        workspace_dict = workspace.dict()
+        workspace_dict = workspace.model_dump()
         # Ensure the deployed versions are in reverse chronological order
         workspace_dict["deployed_versions"] = workspace_dict.get("deployed_versions", [])
         
@@ -21,7 +23,7 @@ class WorkspaceRepository:
         })
         
         if existing:
-            raise ValueError(f"Workspace {workspace.workspace_name} already exists for user {workspace.username}")
+            raise WorkspaceAlreadyExistsException(f"Workspace {workspace.workspace_name} already exists for user {workspace.username}")
         
         result = await user_workspace_collection.insert_one(workspace_dict)
         return str(result.inserted_id)
@@ -34,6 +36,13 @@ class WorkspaceRepository:
             "workspace_name": {"$regex": f"^{re.escape(workspace_name)}$", "$options": "i"}
         })
         
+        # check if vm config exists in the workspace dict
+        if workspace_dict and "vm_config" in workspace_dict:
+            # if instance of vm_config is not VMConfig and is a string, convert it to VMConfig
+            if isinstance(workspace_dict["vm_config"], str):
+                import json
+                config  = json.loads(workspace_dict["vm_config"])
+                workspace_dict["vm_config"] = config
         if workspace_dict:
             return UserWorkspace(**workspace_dict)
         return None
@@ -201,3 +210,35 @@ class WorkspaceRepository:
                     orphaned_count += 1
         
         return orphaned_count
+    
+    @staticmethod
+    async def update_vm_config_state(username: str, workspace_name: str, vm_config: VMConfig) -> bool:
+        """Update VM configuration for a workspace"""
+        result = await user_workspace_collection.update_one(
+            {
+                "username": username,
+                "workspace_name": {"$regex": f"^{re.escape(workspace_name)}$", "$options": "i"}
+            },
+            {
+                "$set": {
+                    "vm_config": vm_config,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+
+    @staticmethod
+    async def clear_vm_config_state(username: str, workspace_name: str) -> bool:
+        """Clear VM configuration from a workspace"""
+        result = await user_workspace_collection.update_one(
+            {
+                "username": username,
+                "workspace_name": {"$regex": f"^{re.escape(workspace_name)}$", "$options": "i"}
+            },
+            {
+                "$unset": {"vm_config": ""},
+                "$set": {"updated_at": datetime.utcnow()}
+            }
+        )
+        return result.modified_count > 0

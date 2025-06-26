@@ -8,7 +8,9 @@ import time
 import os
 import base64
 from azure.core.exceptions import ResourceNotFoundError
-
+from app.models.workspace import VMConfig
+from app.repositories.workspace_repository import WorkspaceRepository
+from app.models.exceptions.known_exceptions import VMCreationFailedException, VMNotFoundException, VMInfoNotAvailableException
 logger = logging.getLogger(__name__)
 
 class SpotVMCreator:
@@ -50,7 +52,7 @@ class SpotVMCreator:
             raise ValueError(f"Failed to read cloud-init file: {e}")
     
     def create_spot_vm(self, vm_name: str, vm_size: str = "Standard_B2ats_v2", 
-                       admin_username: str = "azureuser", ssh_public_key: str = None) -> Dict:
+                       admin_username: str = "azureuser", ssh_public_key: str = None) -> Optional[VMConfig]:
         """
         Create a spot VM and return its configuration including IP address
         """
@@ -66,10 +68,10 @@ class SpotVMCreator:
                     ssh_key_resource = self.compute_client.ssh_public_keys.get(self.resource_group, 'spot_vm_key')
                     ssh_public_key = ssh_key_resource.public_key
                 except ResourceNotFoundError:
-                    raise ValueError("SSH public key resource 'spot_vm_key' not found in resource group {self.resource_group}")
+                    raise VMCreationFailedException("SSH public key resource 'spot_vm_key' not found in resource group {self.resource_group}")
                 except Exception as e:
                     logger.error(f"Error fetching SSH public key: {e}")
-                    raise
+                    raise VMCreationFailedException(f"Failed to create VM {vm_name}") from e
             
             nic_name = f"{vm_name}-nic"
             
@@ -85,9 +87,7 @@ class SpotVMCreator:
                     break
             
             if not subnet:
-                raise ValueError(f"Subnet {self.subnet_name} not found in virtual network {self.vnet_name}")
-            
- 
+                raise VMCreationFailedException(f"Subnet {self.subnet_name} not found in virtual network {self.vnet_name}")
             
             nic_params = {
                 'location': self.location,
@@ -145,11 +145,13 @@ class SpotVMCreator:
                         }
                     }],
                 },
-                'priority': 'Spot',
-                'eviction_policy': 'Deallocate',
-                'billing_profile': {
-                    'max_price': -1  # -1 means pay up to on-demand price
-                }
+                ##  Uncomment the following lines if you want to use spot VMs.
+                ## We do not have quota for spot VMs in our subscription.
+                #'priority': 'Spot',
+                # 'eviction_policy': 'Deallocate',
+                # 'billing_profile': {
+                #     'max_price': -1  # -1 means pay up to on-demand price
+                # }
             }
             
             logger.info(f"Creating spot VM: {vm_name}")
@@ -166,26 +168,26 @@ class SpotVMCreator:
             )
             private_ip = nic_info.ip_configurations[0].private_ip_address
             
-            vm_config = {
-                'vm_name': vm_name,
-                'vm_id': vm_result.id,
-                'resource_group': self.resource_group,
-                'location': self.location,
-                'vm_size': vm_size,
-                'private_ip': private_ip,
-                'nic_id': nic_result.id,
-                'vnet_name': self.vnet_name,
-                'subnet_name': self.subnet_name,
-                'status': 'running',
-                'created_at': time.time()
-            }
-            
+            vm_config = VMConfig(
+                vm_name=vm_name,
+                vm_id=vm_result.id,
+                resource_group=self.resource_group,
+                location=self.location,
+                vm_size=vm_size,
+                private_ip=private_ip,
+                nic_id=nic_result.id,
+                vnet_name=self.vnet_name,
+                subnet_name=self.subnet_name,
+                status='running',
+                created_at=time.time(),  # This would ideally come from tags or database
+            )
+
             logger.info(f"Spot VM created successfully: {vm_name} with private IP: {private_ip}")
             return vm_config
             
         except Exception as e:
-            logger.error(f"Error creating spot VM {vm_name}: {str(e)}")
-            raise
+            logger.error(f"Error creating VM {vm_name}: {str(e)}")
+            raise VMCreationFailedException(f"Failed to create VM {vm_name}: {str(e)}") from e
     
     def vm_exists(self, vm_name: str) -> bool:
         """Check if a VM exists"""
@@ -212,12 +214,11 @@ class SpotVMCreator:
             
             return None
         except ResourceNotFoundError:
-            return None
+            raise VMNotFoundException(f"VM {vm_name} not found in resource group {self.resource_group}")
         except Exception as e:
-            logger.error(f"Error getting VM status for {vm_name}: {str(e)}")
-            return None
-    
-    def get_vm_details(self, vm_name: str) -> Optional[Dict]:
+            raise VMInfoNotAvailableException(f"Failed to get VM status for {vm_name}: {str(e)}") from e
+
+    def get_vm_details(self, vm_name: str) -> Optional[VMConfig]:
         """Get detailed information about a VM"""
         try:
             vm = self.compute_client.virtual_machines.get(self.resource_group, vm_name)
@@ -229,25 +230,25 @@ class SpotVMCreator:
             nic_info = self.network_client.network_interfaces.get(self.resource_group, nic_name)
             private_ip = nic_info.ip_configurations[0].private_ip_address
             
-            return {
-                'vm_name': vm_name,
-                'vm_id': vm.id,
-                'resource_group': self.resource_group,
-                'location': vm.location,
-                'vm_size': vm.hardware_profile.vm_size,
-                'private_ip': private_ip,
-                'nic_id': nic_id,
-                'vnet_name': self.vnet_name,
-                'subnet_name': self.subnet_name,
-                'status': status,
-                'priority': vm.priority,
-                'created_at': time.time()  # This would ideally come from tags or database
-            }
+            return VMConfig(
+                vm_name=vm_name,
+                vm_id=vm.id,
+                resource_group=self.resource_group,
+                location=vm.location,
+                vm_size=vm.hardware_profile.vm_size,
+                private_ip=private_ip,
+                nic_id=nic_id,
+                vnet_name=self.vnet_name,
+                subnet_name=self.subnet_name,
+                status=status if status else 'unknown',
+                priority=vm.priority if hasattr(vm, 'priority') else None,  # Handle if priority is not set
+                created_at=time.time()
+            )
         except ResourceNotFoundError:
-            return None
+            raise VMNotFoundException(f"VM {vm_name} not found in resource group {self.resource_group}")
         except Exception as e:
             logger.error(f"Error getting VM details for {vm_name}: {str(e)}")
-            return None
+            raise VMInfoNotAvailableException(f"Failed to get VM details for {vm_name}: {str(e)}") from e
     
     def start_vm(self, vm_name: str) -> bool:
         """Start a deallocated VM"""
@@ -321,39 +322,21 @@ class SpotVMCreator:
             logger.error(f"Error listing VMs: {str(e)}")
             return []
 
-    async def update_workspace_table(self, username: str, workspace_name: str, vm_config: Dict):
+    async def update_workspace_table(self, username: str, workspace_name: str, vm_config: VMConfig):
         """
         Update workspace table with VM configuration including Docker context details
         """
         try:
-            from app.repositories.workspace_repository import WorkspaceRepository
-            from app.models.workspace import VMConfig
             
-            # Convert vm_config dict to VMConfig model with Docker context essentials
-            vm_config_model = VMConfig(
-                vm_name=vm_config.get('vm_name'),
-                vm_id=vm_config.get('vm_id'),
-                resource_group=vm_config.get('resource_group'),
-                location=vm_config.get('location'),
-                vm_size=vm_config.get('vm_size'),
-                private_ip=vm_config.get('private_ip'),  # Critical for Docker context
-                nic_id=vm_config.get('nic_id'),
-                vnet_name=vm_config.get('vnet_name'),
-                subnet_name=vm_config.get('subnet_name'),
-                status=vm_config.get('status'),
-                priority=vm_config.get('priority'),
-                created_at=vm_config.get('created_at'),
-                last_checked=None  # Will be updated during monitoring
-            )
-            # Await the async update_workspace call
-            success = await WorkspaceRepository.update_workspace(
+            # Await the async update_vm_config call instead of generic update_workspace
+            success = await WorkspaceRepository.update_vm_config_state(
                 username=username,
                 workspace_name=workspace_name,
-                update_data={"vm_config": vm_config_model.dict()}
+                vm_config=vm_config
             )
             if success:
                 logger.info(f"Successfully updated workspace {workspace_name} for user {username} with VM configuration")
-                logger.info(f"VM private IP: {vm_config.get('private_ip')} - ready for Docker context")
+                logger.info(f"VM private IP: {vm_config.private_ip} - ready for Docker context")
             else:
                 logger.warning(f"Failed to update workspace {workspace_name} for user {username}")
             return success
@@ -367,12 +350,11 @@ class SpotVMCreator:
         Clear VM configuration from workspace table when VM is deleted
         """
         try:
-            from app.repositories.workspace_repository import WorkspaceRepository
-            # Await the async update_workspace call
-            success = await WorkspaceRepository.update_workspace(
+
+            # Use the new clear_vm_config_state to remove the vm_config field
+            success = await WorkspaceRepository.clear_vm_config_state(
                 username=username,
-                workspace_name=workspace_name,
-                update_data={"vm_config": None}
+                workspace_name=workspace_name
             )
             if success:
                 logger.info(f"Successfully cleared VM configuration from workspace {workspace_name} for user {username}")
@@ -382,21 +364,18 @@ class SpotVMCreator:
         except Exception as e:
             logger.error(f"Error clearing VM config for {username}/{workspace_name}: {str(e)}")
             return False
-    
+
     def delete_spot_vm(self, vm_name: str):
         """Delete spot VM and associated resources"""
         try:
             logger.info(f"Deleting VM: {vm_name}")
-            
             # Get VM details before deletion to find the OS disk
             vm = self.compute_client.virtual_machines.get(self.resource_group, vm_name)
             os_disk_name = vm.storage_profile.os_disk.name
-            
             # Delete the VM
             self.compute_client.virtual_machines.begin_delete(
                 self.resource_group, vm_name
             ).wait()
-            
             # Delete the OS disk
             try:
                 logger.info(f"Deleting OS disk: {os_disk_name}")
@@ -406,7 +385,6 @@ class SpotVMCreator:
                 logger.info(f"Deleted OS disk: {os_disk_name}")
             except Exception as e:
                 logger.warning(f"Failed to delete OS disk {os_disk_name}: {str(e)}")
-            
             # Delete network interface (but keep the existing VNet)
             nic_name = f"{vm_name}-nic"
             try:

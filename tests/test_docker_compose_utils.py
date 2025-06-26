@@ -175,26 +175,19 @@ def test_get_host_port_docker_compose():
         from app.docker.zip_utils import ZipUtils
         print_info(f"Using ZipUtils to extract {ZIP_FILE_PATH} to {PROJECT_PATH}")
         
-        extract_result = ZipUtils.extract_zip_file(
-            zip_file_path=ZIP_FILE_PATH,
-            user_name=TEST_USERNAME,
-            project_name="BasePythonWebApp",
+        destination_path = ZipUtils.extract_zip_file(zip_file_path=ZIP_FILE_PATH, user_name=TEST_USERNAME, project_name="BasePythonWebApp",
             base_directory=PROJECT_PATH
         )
-        
-        if not extract_result["success"]:
-            print_failure(f"Failed to extract test project: {extract_result['message']}")
-            return False
             
         # Make sure the docker-compose.yml exists
-        compose_file = os.path.join(extract_result["project_path"], "docker-compose.yml")
+        compose_file = os.path.join(destination_path, "docker-compose.yml")
         if not os.path.exists(compose_file):
-            print_failure(f"docker-compose.yml not found in {extract_result["project_path"]}")
+            print_failure(f"docker-compose.yml not found in {destination_path}")
             return False
             
         # Test the function with the actual docker-compose file
-        host_ports = DockerComposeUtils._get_host_port_docker_compose(extract_result["project_path"])
-        
+        host_ports = DockerComposeUtils._get_host_port_docker_compose(destination_path)
+
         assert_not_none(host_ports, "Host ports should not be None")
 
         # Check that we have ports in the dictionary

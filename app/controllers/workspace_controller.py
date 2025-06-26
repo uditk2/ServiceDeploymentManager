@@ -10,21 +10,36 @@ import shutil
 from app.custom_logging import logger
 from app.workspace_monitoring.log_watcher_manager import log_watcher_manager
 from app.docker.helper_functions import generate_project_name_from_user_workspace
+from app.models.exceptions.known_exceptions import (
+    WorkspaceUploadFailedException, 
+    WorkspaceCreationFailedException,
+    WorkspaceUpdateFailedException,
+    WorkspaceNotFoundException
+)
+from app.models.results.workspace_controller_results import (
+    CreateWorkspaceResult, 
+    UpdateWorkspaceResult,
+    UploadWorkspaceResult
+)
+
 class WorkspaceController:
     @staticmethod
-    async def create_workspace(workspace: UserWorkspace) -> Dict:
+    async def create_workspace(workspace: UserWorkspace) -> CreateWorkspaceResult:
         """Create a new user workspace"""
         try:
             workspace_id = await WorkspaceRepository.create_workspace(workspace)
-            return {
-                "status": "success", 
-                "message": "Workspace created successfully", 
-                "workspace_id": workspace_id
-            }
+            return  CreateWorkspaceResult(
+                status="success",
+                message="Workspace created successfully",
+                workspace_id=workspace_id,
+                workspace_name=workspace.workspace_name,
+                username=workspace.username,
+                workspace_path=workspace.workspace_path
+            )
         except ValueError as e:
-            raise ValueError(str(e))
+            raise WorkspaceCreationFailedException(str(e))
         except Exception as e:
-            raise Exception(f"Failed to create workspace: {str(e)}")
+            raise WorkspaceCreationFailedException(f"Failed to create workspace: {str(e)}")
 
     @staticmethod
     async def list_workspaces(username: str) -> List[UserWorkspace]:
@@ -43,17 +58,24 @@ class WorkspaceController:
         return workspace
 
     @staticmethod
-    async def update_workspace(username: str, workspace_name: str, data: dict) -> Dict:
+    async def update_workspace(username: str, workspace_name: str, data: dict) -> UpdateWorkspaceResult:
         """Update an existing workspace"""
         try:
             updated = await WorkspaceRepository.update_workspace(username, workspace_name, data)
             if not updated:
                 raise ValueError(f"Workspace {workspace_name} not found for user {username}")
-            return {"status": "success", "message": "Workspace updated successfully"}
+
+            return UpdateWorkspaceResult(
+                status="success",
+                message="Workspace updated successfully",
+                data=data,
+                username=username,
+                workspace_name=workspace_name
+            )
         except ValueError as e:
-            raise ValueError(str(e))
+            raise WorkspaceUpdateFailedException(str(e))
         except Exception as e:
-            raise Exception(f"Failed to update workspace: {str(e)}")
+            raise WorkspaceUpdateFailedException(f"Failed to update workspace: {str(e)}")
 
     @staticmethod
     async def delete_workspace(username: str, workspace_name: str) -> Dict:
@@ -63,7 +85,7 @@ class WorkspaceController:
             # Get workspace details first
             workspace = await WorkspaceRepository.get_workspace(username, workspace_name)
             if not workspace:
-                raise ValueError(f"Workspace {workspace_name} not found for user {username}")
+                raise WorkspaceNotFoundException(f"Workspace {workspace_name} not found for user {username}")
 
             logger.info(f"Found workspace with VM config: {workspace.vm_config is not None}")
             if workspace.vm_config:
@@ -71,8 +93,6 @@ class WorkspaceController:
 
             # Stop any active log watchers for this workspace
             try:
-                
-                
                 project_name = generate_project_name_from_user_workspace(username, workspace_name)
                 
                 # Stop log watcher if the manager is initialized
@@ -89,13 +109,11 @@ class WorkspaceController:
             try:
                 # Use remote VM utils for workspaces with VM configuration
                 logger.info(f"Using remote VM Docker compose down for workspace: {username}/{workspace_name}")
-                result = await DockerComposeRemoteVMUtils.run_docker_compose_down(
+                await DockerComposeRemoteVMUtils.run_docker_compose_down(
                     project_path=workspace.workspace_path,
                     username=username,
                     workspace_name=workspace_name
                 )
-                if not result.success:
-                    logger.warning(f"Docker compose down failed: {result.error}")
             except Exception as e:
                 logger.error(f"Error cleaning up containers: {str(e)}")
 
@@ -118,12 +136,7 @@ class WorkspaceController:
             raise Exception(f"Failed to delete workspace: {str(e)}")
 
     @staticmethod
-    async def upload_workspace(
-        username: str,
-        workspace_name: str,
-        zip_file,
-        docker_image_name: Optional[str] = None
-    ) -> Dict:
+    async def upload_workspace(username: str, workspace_name: str, zip_file, docker_image_name: Optional[str] = None) -> UploadWorkspaceResult:
         """Upload and extract a workspace from a zip file"""
         try:
             # Check if workspace exists
@@ -138,21 +151,13 @@ class WorkspaceController:
                 shutil.copyfileobj(zip_file.file, f)
             
             # Extract the zip file
-            result = ZipUtils.extract_zip_file(temp_path, username, workspace_name)
-            
+            destination_path = ZipUtils.extract_zip_file(temp_path, username, workspace_name)
             # Clean up the temporary file
             os.unlink(temp_path)
-            
-            if not result["success"]:
-                raise ValueError(result["message"])
-            
+
             # If workspace doesn't exist, create it
             if not workspace:
-                new_workspace = UserWorkspace(
-                    username=username,
-                    workspace_name=workspace_name,
-                    workspace_path=result["project_path"]
-                )
+                new_workspace = UserWorkspace(username=username, workspace_name=workspace_name, workspace_path=destination_path)
                 await WorkspaceRepository.create_workspace(new_workspace)
                 logger.info(f"Created new workspace: {username}/{workspace_name}")
             else:
@@ -160,15 +165,15 @@ class WorkspaceController:
                 await WorkspaceRepository.update_workspace(
                     username=username,
                     workspace_name=workspace_name,
-                    update_data={"workspace_path": result["project_path"]}
+                    update_data={"workspace_path": destination_path}
                 )
                 logger.info(f"Updated existing workspace: {username}/{workspace_name}")
-            return {
-                "status": "success",
-                "message": "Workspace uploaded and extracted successfully",
-                "workspace_path": result["project_path"]
-            }
-        except ValueError as e:
-            raise ValueError(str(e))
+            return UploadWorkspaceResult(
+                status="success",
+                message="Workspace uploaded and extracted successfully",
+                workspace_path=destination_path
+            )
+        except WorkspaceCreationFailedException as e:
+            raise WorkspaceUploadFailedException(f"Failed to create workspace: {str(e)}") from e
         except Exception as e:
-            raise Exception(f"Failed to upload workspace: {str(e)}")
+            raise WorkspaceUploadFailedException(f"Failed to upload workspace: {str(e)}") from e

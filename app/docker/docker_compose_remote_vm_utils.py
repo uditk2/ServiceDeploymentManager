@@ -10,49 +10,67 @@ import json
 from app.docker.docker_context_manager import DockerContextManager
 from .services_ports_identifier import ServicesPortsIdentifier
 from app.vm_manager.traefik_toml_generator import TraefikTomlGenerator
+from app.models.results.docker_operation_results import DockerOperationResult, DockerOperationType
+from app.models.exceptions.known_exceptions import (
+    DockerComposeFileNotFoundException,
+    DockerComposeBuildFailedException,
+    DockerComposeDeployFailedException,
+    DockerComposeDownFailedException,
+    DockerComposeCleanupFailedException,
+    DockerComposeSystemCleanupFailedException,
+    DockerContextSetException
+    )
 class DockerComposeRemoteVMUtils:
     """
     Utilities for deploying and managing Docker Compose projects on a remote VM using Docker contexts.
     """
-
     @staticmethod
-    async def set_docker_context(username: str, workspace_name: str, user: str = 'azureuser'):
-        """
-        Set the Docker context for the user's workspace on the remote VM (async).
-        """
-        return await DockerContextManager.set_context_for_user_workspace(username, workspace_name, user)
-
-    @staticmethod
-    async def run_docker_compose_down(project_path, username, workspace_name) -> CommandResult:
+    async def run_docker_compose_down(project_path, username, workspace_name) -> DockerOperationResult:
         try:
-            context_name, _ = await DockerComposeRemoteVMUtils.set_docker_context(username, workspace_name)
+            docker_context_result = await DockerContextManager.set_context_for_user_workspace(username, workspace_name)
             os.chdir(project_path)
             container_name = generate_unique_name(project_base_path=project_path, username=username)
-            cmd = f'docker --context {context_name} compose -p {container_name} down'
-            return DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(cmd, container_name=container_name)
-        except Exception as e:
-            error_msg = f"Error in docker compose down: {traceback.format_exc()}"
-            logger.error(error_msg)
-            return CommandResult(success=False, error=error_msg)
+            cmd = f'docker --context {docker_context_result.context_name} compose -p {container_name} down'
+            result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(cmd, container_name=container_name)
+            if result.success:
+                logger.info(f"Docker Compose project {container_name} brought down successfully.")
+                return DockerOperationResult(success=True, message=f"Docker Compose project {container_name} brought down successfully.", operation=DockerOperationType.DOWN)
+            else:
+                error_msg = f"Failed to bring down Docker Compose project {container_name}: {result.error}"
+                logger.error(error_msg)
+                return DockerOperationResult(success=False, error=error_msg, operation=DockerOperationType.DOWN)
+        except DockerContextSetException as e:
+            raise DockerComposeDownFailedException("Failed to bring down the Docker Compose project") from e
+        except  Exception as e:
+            raise DockerComposeDownFailedException(f"Error bringing down the Docker Compose project: {traceback.format_exc()}") from e
+        
 
     @staticmethod
-    async def run_docker_compose_build(project_path, username, workspace_name) -> CommandResult:
-        context_name, _ = await DockerComposeRemoteVMUtils.set_docker_context(username, workspace_name)
-        os.chdir(project_path)
-        container_name = generate_unique_name(project_base_path=project_path, username=username)
+    async def run_docker_compose_build(project_path, username, workspace_name) -> DockerOperationResult:
         try:
+            context = await DockerContextManager.set_context_for_user_workspace(username, workspace_name)
+            os.chdir(project_path)
+            container_name = generate_unique_name(project_base_path=project_path, username=username)
             compose_file = DockerComposeRemoteVMUtils.get_compose_file_path(project_path=project_path)
             cmd = DockerComposeRemoteVMUtils.generate_build_command(
                 compose_file=compose_file,
                 project_name=container_name,
-                context_name=context_name
+                context_name=context.context_name
             )
             cmd_handler = DockerCommandWithLogHandler(project_path)
-            return cmd_handler.run_docker_commands_with_logging(cmd, container_name=container_name)
+            result = cmd_handler.run_docker_commands_with_logging(cmd, container_name=container_name)
+            return DockerOperationResult(
+                success=result.success,
+                message=result.output if result.success else None,
+                error=result.error,
+                operation=DockerOperationType.BUILD
+            )
+        except DockerContextSetException as e:
+            logger.error(f"Failed to set Docker context: {traceback.format_exc()}")
+            raise DockerComposeBuildFailedException("Failed to build the project") from e
         except Exception as e:
-            error_msg = f"Error building container: {traceback.format_exc()}"
-            logger.error(error_msg)
-            return CommandResult(success=False, error=error_msg)
+            logger.error(f"Error during Docker Compose build: {traceback.format_exc()}")
+            raise DockerComposeBuildFailedException(f"Error during Docker Compose build: {traceback.format_exc()}") from e
 
     @staticmethod
     def get_compose_file_path(project_path: str) -> str:
@@ -102,29 +120,17 @@ class DockerComposeRemoteVMUtils:
         return services_ports
 
     @staticmethod
-    async def run_docker_compose_deploy(project_path, username, workspace_name, env_file_path=None):
-        context_name, private_ip = await DockerComposeRemoteVMUtils.set_docker_context(username, workspace_name)
-        container_name = generate_unique_name(project_base_path=project_path, username=username)
-        env_file_arg = f"--env-file {env_file_path}" if env_file_path else ""
+    async def run_docker_compose_deploy(project_path, username, workspace_name, env_file_path=None)-> DockerOperationResult:
+
         try:
             logger.info("Performing optional pre-deployment cleanup...")
-            cleanup_result = await DockerComposeRemoteVMUtils.run_docker_compose_cleanup(project_path, username=username, workspace_name=workspace_name)
-            if cleanup_result.success:
-                logger.info("Pre-deployment cleanup completed successfully")
-            else:
-                logger.info(f"Pre-deployment cleanup completed with warnings: {cleanup_result.error}")
-        except Exception as cleanup_error:
-            logger.info(f"Pre-deployment cleanup skipped due to error: {str(cleanup_error)}")
+            await DockerComposeRemoteVMUtils.run_docker_compose_cleanup(project_path, username=username, workspace_name=workspace_name)
+        except DockerContextSetException as e:
+            raise DockerComposeDeployFailedException("Failed in cleanup stage for container deployment") from e
         try:
-            logger.info("Performing optional system cleanup...")
-            system_cleanup_result = DockerComposeRemoteVMUtils.run_system_cleanup()
-            if system_cleanup_result.success:
-                logger.info("System cleanup completed successfully")
-            else:
-                logger.info(f"System cleanup completed with warnings: {system_cleanup_result.error}")
-        except Exception as system_cleanup_error:
-            logger.info(f"System cleanup skipped due to error: {str(system_cleanup_error)}")
-        try:
+            context_result = await DockerContextManager.set_context_for_user_workspace(username, workspace_name)
+            container_name = generate_unique_name(project_base_path=project_path, username=username)
+            env_file_arg = f"--env-file {env_file_path}" if env_file_path else ""
             services_ports = DockerComposeRemoteVMUtils._retrieve_external_service_ports(project_path=project_path)
             # Enable Fluentd logging in the compose file before deployment
             compose_file_path = DockerComposeRemoteVMUtils.get_compose_file_path(project_path=project_path)
@@ -134,31 +140,32 @@ class DockerComposeRemoteVMUtils:
                 compose_file=compose_file_path,
                 project_name=container_name,
                 env_file_arg=env_file_arg,
-                context_name=context_name
+                context_name=context_result.context_name
             )
             logger.info("Run command: " + deploy_command)
             run_result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(deploy_command, container_name=container_name)
-            if run_result.success:
-                docker_compose_logger = DockerComposeLogHandler(project_path)
-                docker_compose_logger.follow_compose_logs(
-                    compose_file=compose_file_path,
-                    project_name=container_name
+            if run_result.success is False:
+                return DockerOperationResult(
+                    success=False,
+                    error=run_result.error,
+                    output=run_result.output,
+                    operation=DockerOperationType.UP
                 )
-                # Generate Traefik TOML for each service after deployment
-                traefik_gen = TraefikTomlGenerator()
-                service_name = generate_unique_name(project_base_path=project_path, username=username)
-                toml, final_urls = traefik_gen.generate_toml(
-                    service_name=service_name,
-                    private_ip=private_ip,
-                    service_ports=services_ports
-                )
-                logger.info(f"Generated Traefik TOML for {service_name}: {toml}")
-                run_result.set_deploy_info(json.dumps({"container_name": container_name, "urls": final_urls}))
-                return run_result
-            return run_result
+            docker_compose_logger = DockerComposeLogHandler(project_path)
+            docker_compose_logger.follow_compose_logs(compose_file=compose_file_path, project_name=container_name)
+            traefik_gen = TraefikTomlGenerator()
+            service_name = generate_unique_name(project_base_path=project_path, username=username)
+            toml, final_urls = traefik_gen.generate_toml(service_name=service_name, private_ip=context_result.ip, service_ports=services_ports)
+            return DockerOperationResult(
+                success=True,
+                message="Your project has been deployed successfully.",
+                operation=DockerOperationType.UP,
+                output=run_result.output,
+                metadata={"container_name": container_name,"urls": final_urls}
+            )
         except Exception as e:
             logger.error(f"Error in deploying to remote VM {traceback.format_exc()}")
-            return CommandResult(success=False, error=str(e), deploy_info=json.dumps({"error": traceback.format_exc()}))
+            raise DockerComposeDeployFailedException(message=f"Error in deploying to remote VM: {traceback.format_exc()}", original_exception=e)
 
     @staticmethod
     def generate_deploy_command(compose_file, project_name, env_file_arg=None, context_name=None) -> str:
@@ -214,7 +221,10 @@ class DockerComposeRemoteVMUtils:
         
         # Add env file if specified
         if env_file_arg:
-            command_parts.extend([env_file_arg])
+            if isinstance(env_file_arg, (tuple, list)):
+                command_parts.extend(env_file_arg)
+            else:
+                command_parts.append(env_file_arg)
         
         # Add build command
         command_parts.append("build")
@@ -277,17 +287,17 @@ class DockerComposeRemoteVMUtils:
             
         Returns:
             CommandResult indicating success/failure of cleanup operations
-        """
-        os.chdir(project_path)
-        container_name = generate_unique_name(project_base_path=project_path, username=username)
-        context_name = None
-        if username and workspace_name:
-            context_name, _ = await DockerComposeRemoteVMUtils.set_docker_context(username, workspace_name)
+        """ 
         try:
+            os.chdir(project_path)
+            container_name = generate_unique_name(project_base_path=project_path, username=username)
+            context = await DockerContextManager.set_context_for_user_workspace(username, workspace_name)
             cleanup_commands = [
-                f'docker --context {context_name} compose -p {container_name} down --volumes --remove-orphans' if context_name else f'docker compose -p {container_name} down --volumes --remove-orphans',
-                f'docker --context {context_name} images -q --filter "label=com.docker.compose.project={container_name}" | xargs -r docker --context {context_name} rmi -f 2>/dev/null || true' if context_name else f'docker images -q --filter "label=com.docker.compose.project={container_name}" | xargs -r docker rmi -f 2>/dev/null || true',
-                f'docker --context {context_name} image prune -f' if context_name else 'docker image prune -f'
+                f'docker --context {context.context_name} compose -p {container_name} down --volumes --remove-orphans',
+                f'docker --context {context.context_name} images -q --filter "label=com.docker.compose.project={container_name}" | xargs docker --context {context.context_name} rmi -f 2>/dev/null || true',
+                f'docker --context {context.context_name} image prune -f',
+                f'docker --context {context.context_name} builder prune -f',
+                f'docker --context {context.context_name} volume prune -f'
             ]
             results = []
             for cmd in cleanup_commands:
@@ -302,70 +312,5 @@ class DockerComposeRemoteVMUtils:
                         logger.warning(f"Cleanup command returned None: {cmd}")
                 except Exception as cmd_error:
                     logger.warning(f"Error running cleanup command '{cmd}': {str(cmd_error)}")
-            if results and results[0].success:
-                return CommandResult(
-                    success=True, 
-                    output="Selective cleanup completed successfully",
-                    deploy_info="Project-specific cleanup completed"
-                )
-            else:
-                return CommandResult(
-                    success=True,
-                    output="No existing containers found for this project",
-                    deploy_info="No cleanup needed"
-                )
-        except Exception as e:
-            error_msg = f"Error during selective cleanup: {traceback.format_exc()}"
-            logger.error(error_msg)
-            return CommandResult(success=False, error=error_msg)
-
-    @staticmethod
-    def run_system_cleanup() -> CommandResult:
-        """
-        Perform safe system-wide Docker cleanup that won't affect running containers.
-        Only removes truly unused resources.
-        
-        Returns:
-            CommandResult indicating success/failure of system cleanup
-        """
-        try:
-            # Only run safe cleanup commands that won't affect running containers
-            safe_cleanup_commands = [
-                # Remove only dangling images (not used by any container)
-                'docker image prune -f',
-                # Remove only unused build cache
-                'docker builder prune -f',
-                # Remove only unused volumes (not mounted by running containers)
-                'docker volume prune -f'
-            ]
-            
-            results = []
-            for cmd in safe_cleanup_commands:
-                logger.info(f"Running safe system cleanup command: {cmd}")
-                try:
-                    # Use a simple command execution for system cleanup
-                    import subprocess
-                    result = subprocess.run(cmd.split(), capture_output=True, text=True, timeout=60)
-                    if result.returncode == 0:
-                        logger.info(f"Safe cleanup command succeeded: {cmd}")
-                        results.append(True)
-                    else:
-                        logger.warning(f"Safe cleanup command failed: {cmd} - {result.stderr}")
-                        results.append(False)
-                except Exception as cmd_error:
-                    logger.warning(f"Error running safe cleanup command '{cmd}': {str(cmd_error)}")
-                    results.append(False)
-                    
-            success_count = sum(results)
-            total_count = len(results)
-            
-            return CommandResult(
-                success=True,  # Always return success since this is optional optimization
-                output=f"Safe system cleanup completed: {success_count}/{total_count} commands succeeded",
-                deploy_info=f"Safe cleanup: {success_count}/{total_count} operations completed"
-            )
-                
-        except Exception as e:
-            error_msg = f"Error during safe system cleanup: {traceback.format_exc()}"
-            logger.error(error_msg)
-            return CommandResult(success=True, error=error_msg)  # Don't fail deployment for cleanup issues
+        except DockerContextSetException as e:
+            raise DockerComposeCleanupFailedException(original_exception=e)
