@@ -115,7 +115,7 @@ class WorkspaceRepository:
             },
             {
                 "$set": {
-                    "log_watcher": log_watcher_info.dict(),
+                    "log_watcher": log_watcher_info.model_dump(),
                     "updated_at": datetime.utcnow()
                 }
             }
@@ -221,8 +221,8 @@ class WorkspaceRepository:
             },
             {
                 "$set": {
-                    "vm_config": vm_config,
-                    "updated_at": datetime.utcnow()
+                    "vm_config": vm_config.model_dump(),
+                    "updated_at": datetime.now()
                 }
             }
         )
@@ -238,7 +238,7 @@ class WorkspaceRepository:
             },
             {
                 "$unset": {"vm_config": ""},
-                "$set": {"updated_at": datetime.utcnow()}
+                "$set": {"updated_at": datetime.now()}
             }
         )
         return result.modified_count > 0
