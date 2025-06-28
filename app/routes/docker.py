@@ -58,7 +58,14 @@ async def build_deploy_job(username: str, workspace_name: str, zip_file: UploadF
         # Clean up the temporary file if an error occurs
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
-        raise HTTPException(status_code=500, detail=f"Internal Server Error. We are looking into this issue. Error: {str(e)}")
+        await JobRepository.update_job_status(
+            job_id=job_id,
+            status="failed",
+            metadata={
+                "error": "Internal Server Error. Please try again later. We are looking into this issue.",
+                "server_error": True
+            }
+        )
 
 
 async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, temp_file_path: str):
@@ -94,7 +101,8 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
             job_id=job_id,
             status="failed",
             metadata={
-                "error": "Internal Server Error. Please try again later. We are looking into this issue."
+                "error": "Internal Server Error. Please try again later. We are looking into this issue.",
+                "server_error": True
             }
         )
     finally:
@@ -225,6 +233,7 @@ async def run_build_job(username: str, workspace_name: str, job_id: str, temp_fi
         await JobRepository.update_job_status(job_id=job_id,status="failed",
         metadata={
                 "error": "Internal Server Error. Please try again later. We are looking into this issue.",
+                 "server_error": True
             }
         )
         logger.error(f"Error in run_build_job: {traceback.format_exc()}")
