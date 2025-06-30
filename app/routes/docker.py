@@ -17,14 +17,7 @@ from app.docker.docker_log_handler import CommandResult
 from app.models.job import TriggeredJob
 from app.repositories.job_repository import JobRepository
 from app.controllers.workspace_controller import WorkspaceController
-from app.models.exceptions.known_exceptions import (
-    WorkspaceUploadFailedException,
-    WorkspaceCreationFailedException,
-    DockerComposeDownFailedException,
-    DockerComposeBuildFailedException,
-    DockerComposeDeployFailedException,
-    WorkspaceNotFoundException
-)
+from app.docker.server_error_identifier import ServerErrorIdentifier
 from app.models.workspace import UserWorkspace
 from app.custom_logging import logger
 import uuid
@@ -84,7 +77,11 @@ async def run_build_deploy_job(username: str, workspace_name: str, job_id: str, 
         await JobRepository.update_job_status(job_id=job_id,status="running",metadata={"update": result.model_dump_json()})
         result = await DockerComposeRemoteVMUtils.run_docker_compose_build(workspace.workspace_path, username, workspace_name=workspace.workspace_name)
         if result.success is False:
-            await JobRepository.update_job_status(job_id=job_id, status="failed", metadata={"error": result.model_dump_json()})
+            error_type = ServerErrorIdentifier().identify_error(result.error)
+            metadata = {"error": result.model_dump_json()}
+            if error_type is not None:
+                metadata["server_error"] = True
+            await JobRepository.update_job_status(job_id=job_id, status="failed", metadata=metadata)
             return
         await JobRepository.update_job_status(job_id=job_id, status="running", metadata={"update": result.model_dump_json()})
         # Start the Docker container
