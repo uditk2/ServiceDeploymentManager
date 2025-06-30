@@ -20,7 +20,7 @@ class AzureVMConfig:
     location: str = "East US"
     admin_username: str = "azureuser"
     ssh_public_key: Optional[str] = None
-    default_vm_size: str = "Standard_B2ats_v2"
+    default_vm_size: str = os.getenv('VM_SIZE', 'Standard_B2ats_v2')
     
     @classmethod
     def from_environment(cls) -> 'AzureVMConfig':
@@ -54,7 +54,7 @@ class AzureVMConfig:
             location=os.getenv('AZURE_LOCATION', 'East US'),
             admin_username=os.getenv('AZURE_VM_ADMIN_USERNAME', 'azureuser'),
             ssh_public_key=os.getenv('AZURE_SSH_PUBLIC_KEY'),
-            default_vm_size=os.getenv('AZURE_DEFAULT_VM_SIZE', 'Standard_B2ats_v2')
+            default_vm_size=os.getenv('VM_SIZE', 'Standard_B2ats_v2')
         )
     
     def validate(self) -> bool:

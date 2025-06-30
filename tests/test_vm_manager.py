@@ -11,7 +11,8 @@ import sys
 import time
 import logging
 from typing import Dict
-
+from dotenv import load_dotenv
+load_dotenv()
 # Add the app directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -68,7 +69,7 @@ def test_vm_manager():
         result = vm_manager.allocate_or_reuse_vm(
             user_id=test_user,
             workspace_id=test_workspace,
-            vm_size="Standard_B2ats_v2"  # Small size for testing
+            vm_size=os.getenv('VM_SIZE', 'Standard_B2ats_v2')
         )
         logger.info(f"Ensure VM result: {result}")
         
