@@ -2,25 +2,29 @@
 Log Watcher Manager Module
 
 This module provides centralized management for Docker Compose log watcher resurrection
-on application startup. Deployment-time log watching is handled by follow_compose_logs().
+on application startup. It works with remote Docker contexts by focusing on centralized
+app.log files rather than checking local container status. Deployment-time log watching 
+is handled by follow_compose_logs().
 """
 
 import os
-import subprocess
-import shlex
+import traceback
 import asyncio
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 from app.custom_logging import logger
 from app.docker.docker_log_handler import DockerComposeLogHandler
 from app.models.workspace import UserWorkspace
 from app.docker.helper_functions import generate_project_name_from_user_workspace
-
+import os
+from dotenv import load_dotenv
+load_dotenv()
 class LogWatcherManager:
     """Manages resurrection of Docker Compose log watchers on system startup"""
     
     def __init__(self):
         self._log_handler: Optional[DockerComposeLogHandler] = None
         self._initialized = False
+        self.base_path = os.getenv('LOGS_WATCHER_DIR', '/app/watcher')  # Default to /app/watcher if not set
         self._cleanup_task: Optional[asyncio.Task] = None
         self._cleanup_interval = 3600  # 1 hour in seconds
     
@@ -59,7 +63,7 @@ class LogWatcherManager:
             return True
             
         except Exception as e:
-            logger.error(f"Error during log watcher resurrection: {str(e)}")
+            logger.error(f"Error during log watcher resurrection: {traceback.format_exc()}")
             self._log_handler = None
             return False
     
@@ -143,51 +147,32 @@ class LogWatcherManager:
         """
         username = workspace.username
         workspace_name = workspace.workspace_name
-        workspace_path = workspace.workspace_path
         
         try:
-            # Check if workspace has a docker-compose file
-            compose_file = os.path.join(workspace_path, "docker-compose.yml")
-            if not os.path.exists(compose_file):
-                return False
+            # Check for centralized app.log file and its position file
+            app_log_file = f"{self.base_path}/{username}/{workspace_name}/logs/app.log"
+            position_file = f"{app_log_file}.position"
             
-            # Generate project name using the same logic as deployment
-            project_name = self._generate_project_name(username, workspace_name)
-            
-            # Check if containers are still running for this workspace
-            running_services = await self._get_running_services(compose_file, project_name)
-            
-            # If no containers are running, but log files exist, clean them up
-            if not running_services:
-                # Check if there are log files that might indicate orphaned watchers
-                log_file_pattern = f"{project_name}-compose.log"
-                potential_log_files = []
-                
-                # Look for log files in the workspace directory
-                if os.path.exists(workspace_path):
-                    for file in os.listdir(workspace_path):
-                        if file.endswith('-compose.log') and project_name in file:
-                            potential_log_files.append(os.path.join(workspace_path, file))
-                
-                # Also check for position files (indicates active watchers)
-                position_files = []
-                for log_file in potential_log_files:
-                    position_file = f"{log_file}.position"
-                    if os.path.exists(position_file):
-                        position_files.append(position_file)
-                
-                if position_files:
-                    logger.info(f"Found orphaned log watcher artifacts for {username}/{workspace_name} (no running containers)")
-                    
-                    # Clean up position files (this indicates the watcher was active but containers stopped)
-                    for position_file in position_files:
-                        try:
-                            os.remove(position_file)
-                            logger.debug(f"Removed orphaned position file: {position_file}")
-                        except OSError as e:
-                            logger.warning(f"Could not remove position file {position_file}: {e}")
-                    
-                    return True
+            # Check if there's a position file but the log watcher process is no longer running
+            if os.path.exists(position_file):
+                # Check if the log watcher process recorded in the workspace is still running
+                if workspace.log_watcher.log_handler_pid:
+                    try:
+                        import psutil
+                        if not psutil.pid_exists(workspace.log_watcher.log_handler_pid):
+                            logger.info(f"Found orphaned log watcher for {username}/{workspace_name} (PID {workspace.log_watcher.log_handler_pid} no longer exists)")
+                            
+                            # Clean up position file since the process is dead
+                            try:
+                                os.remove(position_file)
+                                logger.debug(f"Removed orphaned position file: {position_file}")
+                            except OSError as e:
+                                logger.warning(f"Could not remove position file {position_file}: {e}")
+                            
+                            return True
+                    except Exception as e:
+                        logger.warning(f"Error checking process {workspace.log_watcher.log_handler_pid}: {e}")
+                        return True  # Assume orphaned if we can't check the process
             
             return False
             
@@ -214,13 +199,13 @@ class LogWatcherManager:
                     resurrected_count += 1
                     
         except Exception as e:
-            logger.error(f"Error during log watcher resurrection: {str(e)}")
+            logger.error(f"Error during log watcher resurrection: {traceback.format_exc()}")
             
         return resurrected_count
     
     async def _resurrect_workspace_log_watcher(self, workspace: UserWorkspace) -> bool:
         """
-        Resurrect log watcher for a specific workspace if containers are running
+        Resurrect log watcher for a specific workspace based on existing log files and positions
         
         Args:
             workspace: The workspace to check and potentially resurrect
@@ -233,69 +218,53 @@ class LogWatcherManager:
         workspace_path = workspace.workspace_path
         
         try:
-            # Check if workspace has a docker-compose file
-            compose_file = os.path.join(workspace_path, "docker-compose.yml")
-            if not os.path.exists(compose_file):
-                logger.debug(f"No docker-compose.yml found for workspace {username}/{workspace_name}")
-                return False
-            
             # Generate project name using the same logic as deployment
             project_name = self._generate_project_name(username, workspace_name)
             
-            # Check if containers are running for this workspace
-            running_services = await self._get_running_services(compose_file, project_name)
+            # Check for centralized app.log file and position file
+            app_log_file = f"{self.base_path}/{username}/{workspace_name}/logs/app.log"
+            position_file = f"{app_log_file}.position"
             
-            if not running_services:
-                logger.debug(f"No running containers found for workspace {username}/{workspace_name}")
+            # Primary criterion: check if position file exists (indicates previous log watching activity)
+            position_file_exists = os.path.exists(position_file)
+            logger.info(f"App log file: {app_log_file}, Position file exists: {position_file}")
+            # Check if there's an existing log file - this indicates the workspace had containers running
+            if not os.path.exists(app_log_file) and not position_file_exists:
+                logger.info(f"No app.log file or position file found for workspace {username}/{workspace_name}")
                 return False
-            
-            logger.info(f"Found running containers for workspace {username}/{workspace_name}: {running_services}")
             
             # Create a log handler for this specific workspace using its own directory
             workspace_log_handler = DockerComposeLogHandler(workspace_path)
             
-            # Start log watcher for this workspace using the same method as deployments
-            success = workspace_log_handler.follow_compose_logs(
-                compose_file=compose_file,
+            # Start log watcher for this workspace pointing to the centralized app.log file
+            # We need to manually create the ComposeLogWatcher and point it to the centralized log
+            from app.workspace_monitoring.compose_log_watcher import ComposeLogWatcher
+            
+            log_watcher = ComposeLogWatcher(
+                stack_name=project_name,
                 project_name=project_name,
-                retain_logs=True  # Keep existing logs when restarting
+                project_path=workspace_path
             )
             
-            if success:
-                logger.info(f"Successfully resurrected log watcher for {username}/{workspace_name}")
-                return True
-            else:
-                logger.warning(f"Failed to resurrect log watcher for {username}/{workspace_name}")
+            # Start watching the centralized app.log file, resuming from last position
+            # Create the log file if it doesn't exist but position file indicates previous activity
+            if not os.path.exists(app_log_file) and position_file_exists:
+                os.makedirs(os.path.dirname(app_log_file), exist_ok=True)
+                with open(app_log_file, 'w') as f:
+                    f.write("")  # Create empty log file
+                logger.info(f"Created empty log file for resurrection: {app_log_file}")
+            
+            log_watcher.start_watching(app_log_file, start_from_beginning=False)
+            workspace_log_handler.log_watchers[project_name] = log_watcher
+            
+            logger.info(f"Successfully resurrected log watcher for {username}/{workspace_name}")
+            return True
             
         except Exception as e:
             logger.error(f"Error resurrecting log watcher for workspace {username}/{workspace_name}: {str(e)}")
             
         return False
-    
-    async def _get_running_services(self, compose_file: str, project_name: str) -> List[str]:
-        """
-        Get list of running services for a Docker Compose project
-        
-        Args:
-            compose_file: Path to the docker-compose.yml file
-            project_name: Docker Compose project name
-            
-        Returns:
-            List of running service names
-        """
-        try:
-            cmd = f"docker compose -f {compose_file} -p {project_name} ps --services --filter status=running"
-            result = subprocess.run(shlex.split(cmd), capture_output=True, text=True, timeout=10)
-            
-            running_services = result.stdout.strip().split('\n')
-            return [s for s in running_services if s.strip()]  # Remove empty strings
-            
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout checking running services for project {project_name}")
-            return []
-        except Exception as e:
-            logger.error(f"Error checking running services for project {project_name}: {str(e)}")
-            return []
+
     
     def _generate_project_name(self, username: str, workspace_name: str) -> str:
         """

@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
+import json
 
 class VMConfig(BaseModel):
     """Model for VM configuration within workspace"""
@@ -54,10 +55,6 @@ class LogWatcherInfo(BaseModel):
         self.last_error = error_message
         self.last_error_time = datetime.utcnow()
         self.log_handler_pid = None
-    
-    def should_be_resurrected(self) -> bool:
-        """Determine if this watcher should be resurrected on startup"""
-        return self.status in ["active", "stopped"] and self.error_count < 5
 
 class UserWorkspace(BaseModel):
     """
@@ -80,6 +77,15 @@ class UserWorkspace(BaseModel):
     
     # VM configuration for spot VM deployment
     vm_config: Optional[VMConfig] = None
+
+    @field_validator('vm_config', mode='before')
+    def parse_vm_config(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return None
+        return v
 
     class Config:
         schema_extra = {

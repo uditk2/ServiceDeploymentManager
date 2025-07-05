@@ -148,23 +148,7 @@ class WorkspaceRepository:
             return await WorkspaceRepository.update_log_watcher_state(username, workspace_name, log_watcher)
         return False
     
-    @staticmethod
-    async def get_workspaces_for_resurrection() -> List[UserWorkspace]:
-        """Get all workspaces that should have their log watchers resurrected"""
-        cursor = user_workspace_collection.find({
-            "$or": [
-                {"log_watcher.status": "active"},
-                {"log_watcher.status": "stopped"}
-            ],
-            "log_watcher.error_count": {"$lt": 5}
-        })
-        
-        workspaces = []
-        async for workspace_dict in cursor:
-            workspaces.append(UserWorkspace(**workspace_dict))
-        
-        return workspaces
-    
+
     @staticmethod
     async def get_active_log_watchers() -> List[UserWorkspace]:
         """Get all workspaces with active log watchers"""

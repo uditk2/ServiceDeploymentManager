@@ -97,9 +97,8 @@ class ComposeLogFileHandler(FileSystemEventHandler):
 class ComposeLogWatcher:
     """Log watcher instance for Docker Compose stacks using watchdog"""
     
-    def __init__(self, stack_name: str, compose_file: str, project_name: str, project_path: str = None):
+    def __init__(self, stack_name: str, project_name: str, project_path: str = None):
         self.stack_name = stack_name
-        self.compose_file = compose_file
         self.project_name = project_name
         self.project_path = project_path
         self.observer = None

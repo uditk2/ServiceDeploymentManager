@@ -17,6 +17,7 @@ services:
       - FLASK_ENV=development
       - WORKSPACE_BASE_DIR=/app/workspaces
       - LOGS_DIR=/app/logs
+      - LOGS_WATCHER_DIR=/app/watcher
       - DOCKER_BASE_DIR=/app/docker/deployments
       - BASE_VOLUME_DIR_MAP=/app/docker/deployments:/Users/uditkhandelwal/Documents/testing
       - DATABASE=deployment_manager_test
@@ -49,7 +50,9 @@ services:
       - backend-network
 
   fluentd:
-    image: fluent/fluentd:v1.16-1
+    build:
+      context: ./fluentd
+      dockerfile: Dockerfile
     platform: linux/amd64
     container_name: fluentd
     ports:
