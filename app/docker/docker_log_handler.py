@@ -42,12 +42,12 @@ class CommandResult:
         })
 
 class DockerCommandWithLogHandler:
-    def __init__(self, logs_path=None):
-        self.project_logs_path = logs_path
+    def __init__(self, project_base_path=None):
+        self.project_base_path = project_base_path
 
     def run_docker_commands_with_logging(self, command: str, container_name: str, retain_logs: bool = False) -> CommandResult:
         try:
-            log_file = get_build_log_file_path(project_base_path=self.project_logs_path, project_name=container_name)
+            log_file = get_build_log_file_path(project_base_path=self.project_base_path, project_name=container_name)
 
             # Remove any existing log with the same name
             if os.path.exists(log_file) and not retain_logs:
@@ -65,7 +65,8 @@ class DockerCommandWithLogHandler:
                 shlex.split(command),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=True
+                universal_newlines=True,
+                cwd=self.project_base_path
             )
 
             stdout, stderr = process.communicate()
@@ -218,25 +219,6 @@ class DockerComposeLogHandler:
             # Remove existing log if not retaining
             if os.path.exists(log_file) and not retain_logs:
                 os.remove(log_file)
-                
-            # handler = RotatingFileHandler(
-            #     log_file,
-            #     maxBytes=1024*1024,  # 1MB
-            #     backupCount=5
-            # )
-            
-            # Command to follow all logs from the Docker Compose project
-            # cmd = f"docker compose -f {compose_file} -p {project_name} logs -f --timestamps"
-            
-            # logger.info(f"Starting Docker Compose logs for project {project_name}")
-            
-            # # Create a process to capture logs from all containers
-            # process = subprocess.Popen(
-            #     shlex.split(cmd),
-            #     stdout=handler.stream,
-            #     stderr=subprocess.STDOUT,
-            #     close_fds=True
-            # )
             
             # Create and start log watcher for this stack
             log_watcher = ComposeLogWatcher(
@@ -250,24 +232,6 @@ class DockerComposeLogHandler:
             start_from_beginning = not retain_logs
             log_watcher.start_watching(log_file, start_from_beginning=start_from_beginning)
             self.log_watchers[project_name] = log_watcher
-            
-            # Start a monitoring thread for this process
-            # monitor_thread = Thread(
-            #     target=self._monitor_compose_project,
-            #     args=(project_name, compose_file, process.pid),
-            #     daemon=True
-            # )
-            # monitor_thread.start()
-            
-            # # Store process info
-            # self.processes[project_name] = {
-            #     'pid': process.pid,
-            #     'compose_file': compose_file,
-            #     'project_name': project_name,
-            #     'monitor_thread': monitor_thread,
-            #     'log_file': log_file,
-            #     'start_time': time.time()
-            # }
             
             logger.info(f"Docker Compose logs for project {project_name} being written to {log_file}")
             logger.info(f"Watchdog log watcher started for Docker Compose stack: {project_name}")

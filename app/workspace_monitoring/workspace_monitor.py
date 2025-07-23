@@ -52,7 +52,7 @@ class WorkspaceMonitor:
         if not log_stash:
             return {"success": True, "message": "No logs to process", "errors_found": 0, "bugs_submitted": 0}
         
-        logger.info(f"[WorkspaceMonitor-{self.workspace_name}] Monitoring {len(log_stash)} log lines")
+        logger.debug(f"[WorkspaceMonitor-{self.workspace_name}] Monitoring {len(log_stash)} log lines")
         
         try:
             log_stash = "\n".join(log_stash) if isinstance(log_stash, List) else log_stash
@@ -69,7 +69,7 @@ class WorkspaceMonitor:
             errors_found = len(error_logs)
             
             if errors_found == 0:
-                logger.info(f"[WorkspaceMonitor-{self.workspace_name}] No errors found")
+                logger.debug(f"[WorkspaceMonitor-{self.workspace_name}] No errors found")
                 return {"success": True, "message": "No errors detected", "errors_found": 0, "bugs_submitted": 0}
             
             logger.info(f"[WorkspaceMonitor-{self.workspace_name}] Found {errors_found} error groups, submitting bug reports")
@@ -98,7 +98,7 @@ Workspace: {self.workspace_name}
                     
                     if result.get("success", False):
                         bugs_submitted += 1
-                        logger.info(f"[WorkspaceMonitor-{self.workspace_name}] Submitted bug report {i + 1}")
+                        logger.debug(f"[WorkspaceMonitor-{self.workspace_name}] Submitted bug report {i + 1}")
                     else:
                         logger.error(f"[WorkspaceMonitor-{self.workspace_name}] Failed to submit bug report {i + 1}: {result.get('error', 'Unknown error')}")
                         
@@ -106,7 +106,7 @@ Workspace: {self.workspace_name}
                     logger.error(f"[WorkspaceMonitor-{self.workspace_name}] Exception submitting bug report {i + 1}: {str(e)}")
             
             message = f"Found {errors_found} errors, submitted {bugs_submitted} bug reports"
-            logger.info(f"[WorkspaceMonitor-{self.workspace_name}] {message}")
+            logger.debug(f"[WorkspaceMonitor-{self.workspace_name}] {message}")
             
             return {
                 "success": True,

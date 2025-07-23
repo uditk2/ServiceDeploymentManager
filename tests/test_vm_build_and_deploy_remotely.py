@@ -135,8 +135,11 @@ def test_ensure_vm_then_build_deploy():
     
     # 1. Ensure VM
     url = f"{API_BASE_URL}/api/vm/ensure/{TEST_USERNAME}/{TEST_WORKSPACE}"
-    print_test_header("Ensuring VM for user/workspace")
-    resp = requests.post(url, headers=headers)
+    body = {"create": False}
+
+    print_test_header("Ensuring VM for user/workspace (create=False)")
+    print_info(f"Request body: {body}")
+    resp = requests.post(url, headers=headers, json=body)
     if resp.status_code != 200:
         print_failure(f"Failed to ensure VM: {resp.text}")
         return False

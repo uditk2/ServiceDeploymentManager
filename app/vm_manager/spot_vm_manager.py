@@ -96,6 +96,10 @@ class SpotVMManager:
                 # Update workspace with current VM details
                 if workspace_id:
                     await self.vm_creator.update_workspace_table(user_id, workspace_id, existing_vm)
+                
+                # Perform comprehensive Docker cleanup on the running VM
+                await self._perform_vm_docker_cleanup(user_id, workspace_id, vm_name, "running VM")
+                
                 return VMInfoResult(
                     ip=existing_vm.private_ip,
                     vm_status=existing_vm.status,
@@ -109,6 +113,10 @@ class SpotVMManager:
                     # Update workspace with restarted VM details
                     if workspace_id:
                         await self.vm_creator.update_workspace_table(user_id, workspace_id, updated_vm)
+                    
+                    # Perform comprehensive Docker cleanup on the restarted VM
+                    await self._perform_vm_docker_cleanup(user_id, workspace_id, vm_name, "restarted VM")
+                    
                     return  VMInfoResult(
                         ip=updated_vm.private_ip,
                         vm_name=updated_vm.vm_name,
@@ -134,6 +142,12 @@ class SpotVMManager:
         # Update workspace with VM configuration if workspace_id provided
         if workspace_id:
             await self.vm_creator.update_workspace_table(user_id, workspace_id, vm_config)
+        
+        time.sleep(10)  # Wait for VM to be fully provisioned
+        
+        # Perform comprehensive Docker cleanup on the newly created VM
+        await self._perform_vm_docker_cleanup(user_id, workspace_id, vm_name, "newly created VM")
+        
         return VMInfoResult(
             ip=vm_config.private_ip,
             vm_name=vm_config.vm_name,
@@ -337,3 +351,26 @@ class SpotVMManager:
             vm_size=vm_size,
             force_recreate=force_recreate
         ))
+    
+    async def _perform_vm_docker_cleanup(self, user_id: str, workspace_id: str, vm_name: str, context_description: str = "VM") -> None:
+        """
+        Helper method to perform comprehensive Docker cleanup on a VM.
+        This method ensures all Docker containers, images, and resources are cleaned up
+        before making the VM available for use.
+        
+        Args:
+            user_id: User identifier
+            workspace_id: Workspace identifier  
+            vm_name: Name of the VM
+            context_description: Description for logging (e.g., "running VM", "restarted VM")
+        """
+        try:
+            logger.info(f"Performing Docker cleanup on {context_description.lower()} {vm_name}")
+            from app.docker.docker_compose_remote_vm_utils import DockerComposeRemoteVMUtils
+            cleanup_result = await DockerComposeRemoteVMUtils.run_complete_vm_cleanup(user_id, workspace_id)
+            if cleanup_result.success:
+                logger.info(f"Docker cleanup completed successfully for {context_description.lower()} {vm_name}")
+            else:
+                logger.warning(f"Docker cleanup completed with warnings for {context_description.lower()} {vm_name}: {cleanup_result.error}")
+        except Exception as cleanup_error:
+            logger.warning(f"Docker cleanup failed for {context_description.lower()} {vm_name}, but continuing: {str(cleanup_error)}")

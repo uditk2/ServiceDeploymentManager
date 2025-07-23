@@ -51,7 +51,7 @@ class ErrorIdentifier:
         response,_ = self._agent.execute_user_ask(user_input=log_stash, 
                                       chat_history=None, 
                                       temperature=0.0, 
-                                      json_response=True, model="gpt-4.1")
+                                      json_response=True, model="gpt-4o-mini")
         try:
             errors = json.loads(response)
             if errors and isinstance(errors, dict) and "errors" in errors:

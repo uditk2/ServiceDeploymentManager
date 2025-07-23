@@ -27,10 +27,14 @@ class DockerComposeRemoteVMUtils:
     @staticmethod
     async def run_docker_compose_down(project_path, username, workspace_name) -> DockerOperationResult:
         try:
+            service_name = generate_unique_name(project_base_path=project_path, username=username)
+            traefik_gen = TraefikTomlGenerator()
+            # Delete the TOML file for the service
+            traefik_gen.delete_toml(service_name)
             docker_context_result = await DockerContextManager.set_context_for_user_workspace(username, workspace_name)
-            os.chdir(project_path)
             container_name = generate_unique_name(project_base_path=project_path, username=username)
-            cmd = f'docker --context {docker_context_result.context_name} compose -p {container_name} down'
+            compose_file = DockerComposeRemoteVMUtils.get_compose_file_path(project_path=project_path)
+            cmd = f'docker --context {docker_context_result.context_name} compose -f {compose_file} -p {container_name} down'
             result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(cmd, container_name=container_name)
             if result.success:
                 logger.info(f"Docker Compose project {container_name} brought down successfully.")
@@ -49,7 +53,6 @@ class DockerComposeRemoteVMUtils:
     async def run_docker_compose_build(project_path, username, workspace_name) -> DockerOperationResult:
         try:
             context = await DockerContextManager.set_context_for_user_workspace(username, workspace_name)
-            os.chdir(project_path)
             container_name = generate_unique_name(project_base_path=project_path, username=username)
             compose_file = DockerComposeRemoteVMUtils.get_compose_file_path(project_path=project_path)
             cmd = DockerComposeRemoteVMUtils.generate_build_command(
@@ -123,7 +126,7 @@ class DockerComposeRemoteVMUtils:
     async def run_docker_compose_deploy(project_path, username, workspace_name, env_file_path=None)-> DockerOperationResult:
 
         try:
-            logger.info("Performing optional pre-deployment cleanup...")
+            logger.debug("Performing optional pre-deployment cleanup...")
             await DockerComposeRemoteVMUtils.run_docker_compose_cleanup(project_path, username=username, workspace_name=workspace_name)
         except DockerContextSetException as e:
             raise DockerComposeDeployFailedException("Failed in cleanup stage for container deployment") from e
@@ -142,7 +145,7 @@ class DockerComposeRemoteVMUtils:
                 env_file_arg=env_file_arg,
                 context_name=context_result.context_name
             )
-            logger.info("Run command: " + deploy_command)
+            logger.debug("Run command: " + deploy_command)
             run_result = DockerCommandWithLogHandler(project_path).run_docker_commands_with_logging(deploy_command, container_name=container_name)
             if run_result.success is False:
                 return DockerOperationResult(
@@ -194,8 +197,8 @@ class DockerComposeRemoteVMUtils:
         command_parts.append("up")
         # Add detached mode
         command_parts.append("-d")
-          # Add build flag. Since we are building it earlier. we can skip this.
-        command_parts.append("--build")    
+        # Add --wait flag to ensure it waits for the containers to be ready
+        command_parts.append("--wait")
         
         # Join all parts with spaces
         return " ".join(command_parts)
@@ -314,3 +317,84 @@ class DockerComposeRemoteVMUtils:
                     logger.warning(f"Error running cleanup command '{cmd}': {str(cmd_error)}")
         except DockerContextSetException as e:
             raise DockerComposeCleanupFailedException(original_exception=e)
+
+    @staticmethod
+    async def run_complete_vm_cleanup(username, workspace_name) -> CommandResult:
+        """
+        Perform comprehensive VM cleanup that stops all containers and cleans the entire VM.
+        This is more aggressive than project-specific cleanup and is used when 
+        allocating/reusing VMs to ensure a clean state.
+        
+        Args:
+            username: Username for Docker context
+            workspace_name: Workspace name for Docker context
+            
+        Returns:
+            CommandResult indicating success/failure of cleanup operations
+        """
+        try:
+            logger.info(f"Starting complete VM cleanup for {username}/{workspace_name}")
+            context = await DockerContextManager.set_context_for_user_workspace(username, workspace_name)
+            
+            # Comprehensive cleanup commands that will clean the entire VM
+            vm_cleanup_commands = [
+                # Stop all running containers
+                f'docker --context {context.context_name} stop $(docker --context {context.context_name} ps -q) 2>/dev/null || true',
+                # Remove all containers (stopped and running)
+                f'docker --context {context.context_name} container prune -f',
+                # Remove all unused images
+                f'docker --context {context.context_name} image prune -a -f',
+                # Remove all unused volumes
+                f'docker --context {context.context_name} volume prune -f',
+                # Remove all unused networks
+                f'docker --context {context.context_name} network prune -f',
+                # Remove all build cache
+                f'docker --context {context.context_name} builder prune -a -f',
+                # System-wide cleanup (this is safe and removes only truly unused resources)
+                f'docker --context {context.context_name} system prune -a -f --volumes'
+            ]
+            
+            results = []
+            successful_commands = 0
+            
+            for cmd in vm_cleanup_commands:
+                logger.info(f"Running VM cleanup command: {cmd}")
+                try:
+                    # Create a simple project path for logging (this is just for the log handler)
+                    import tempfile
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        result = DockerCommandWithLogHandler(temp_dir).run_docker_commands_with_logging(cmd, container_name="vm-cleanup")
+                        if result:
+                            results.append(result)
+                            if result.success:
+                                successful_commands += 1
+                                logger.info(f"VM cleanup command succeeded: {cmd}")
+                            else:
+                                logger.warning(f"VM cleanup command failed (non-critical): {cmd} - {result.error}")
+                        else:
+                            logger.warning(f"VM cleanup command returned None: {cmd}")
+                except Exception as cmd_error:
+                    logger.warning(f"Error running VM cleanup command '{cmd}': {str(cmd_error)}")
+                    # Continue with other cleanup commands even if one fails
+            
+            total_commands = len(vm_cleanup_commands)
+            logger.info(f"VM cleanup completed: {successful_commands}/{total_commands} commands succeeded")
+            
+            return CommandResult(
+                success=True,  # Always return success since this cleanup is best-effort
+                output=f"Complete VM cleanup completed: {successful_commands}/{total_commands} commands succeeded",
+                deploy_info=f"VM cleanup: {successful_commands}/{total_commands} operations completed"
+            )
+                
+        except DockerContextSetException as e:
+            error_msg = f"Failed to set Docker context for VM cleanup: {str(e)}"
+            logger.error(error_msg)
+            raise DockerComposeCleanupFailedException(original_exception=e)
+        except Exception as e:
+            error_msg = f"Error during complete VM cleanup: {traceback.format_exc()}"
+            logger.error(error_msg)
+            return CommandResult(
+                success=False, 
+                error=error_msg,
+                deploy_info="VM cleanup failed"
+            )

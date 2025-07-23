@@ -68,3 +68,15 @@ class TraefikTomlGenerator:
             toml.dump(config, f)
         
         return toml_file_path, final_urls
+
+
+    def delete_toml(self, service_name):
+        """
+        Delete the TOML configuration file for a service.
+        
+        Args:
+            service_name (str): Name of the service
+        """
+        toml_file_path = Path(self.base_location) / f"{service_name}.toml"
+        toml_file_path.unlink(missing_ok=True)
+        return not toml_file_path.exists()

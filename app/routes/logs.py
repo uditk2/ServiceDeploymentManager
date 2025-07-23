@@ -21,7 +21,7 @@ async def get_workspace_logs(
     username: str = Path(..., description="The username (can be an email address)"), 
     workspace_name: str = Path(..., description="The workspace name"),
     minutes: Optional[int] = Query(None, description="Get logs from last X minutes"),
-    lines: Optional[int] = Query(50, description="Number of log lines to return"),
+    lines: Optional[int] = Query(None, description="Number of log lines to return"),
     service: Optional[str] = None,
     since: Optional[str] = None,
     until: Optional[str] = None,

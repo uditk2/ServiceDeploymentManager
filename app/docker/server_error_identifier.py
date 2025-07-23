@@ -47,7 +47,7 @@ class ServerErrorIdentifier:
             chat_history=None,
             temperature=0.0,
             json_response=True,
-            model="gpt-4.1"  # Use the appropriate model
+            model="gpt-4o-mini"  # Use the appropriate model
         )
         json_response = json.loads(response)
 

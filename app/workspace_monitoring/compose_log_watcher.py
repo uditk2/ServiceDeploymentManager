@@ -131,16 +131,18 @@ class ComposeLogWatcher:
             # Create log directory if it doesn't exist
             log_dir = os.path.dirname(log_file_path)
             os.makedirs(log_dir, exist_ok=True)
-            
-            # Create log file if it doesn't exist
-            if not os.path.exists(log_file_path):
-                with open(log_file_path, 'w') as f:
-                    f.write("")
-            
             # Determine starting position
             start_position = None
             if start_from_beginning:
                 # For new deployments, start from the beginning to capture everything
+                # remove any existing position file
+                            # Create log file if it doesn't exist
+                if not os.path.exists(log_file_path):
+                    with open(log_file_path, 'w') as f:
+                        f.write("")
+                position_file = f"{log_file_path}.position"
+                if os.path.exists(position_file):
+                    os.remove(position_file)
                 start_position = 0
                 logger.info(f"Starting new log watcher from beginning of file (position 0)")
             else:

@@ -1,7 +1,8 @@
 import asyncio
 import uuid
 from fastapi import APIRouter, HTTPException
-from typing import Dict
+from typing import Dict, Optional
+from pydantic import BaseModel
 
 from app.models.job import TriggeredJob
 from app.repositories.job_repository import JobRepository
@@ -11,13 +12,17 @@ from app.models.workspace import UserWorkspace
 from app.docker.config import DockerConfig  # for project dir generation similar approach
 from app.custom_logging import logger
 import traceback
+
+class EnsureVMRequest(BaseModel):
+    create: bool = True
+
 router = APIRouter(
     prefix="/api/vm",
     tags=["vm"]
 )
 
 @router.post("/ensure/{username}/{workspace_name}", response_model=dict)
-async def ensure_vm_job(username: str, workspace_name: str):
+async def ensure_vm_job(username: str, workspace_name: str, request: Optional[EnsureVMRequest] = None):
     """
     Create a job to ensure a spot VM exists (create or start) for given user and workspace
     """
@@ -32,15 +37,18 @@ async def ensure_vm_job(username: str, workspace_name: str):
         job = TriggeredJob(job_id=str(uuid.uuid4()), username=username, workspace_name=user_workspace.workspace_name,status="pending",job_type="ensure_vm")
         job_id = await JobRepository.create_job(job)
 
+        # Handle optional request body - default to create=True if not provided
+        create_vm = request.create if request else True
+
         # Background task
-        asyncio.create_task(run_ensure_vm_job(username, workspace_name, job_id))
+        asyncio.create_task(run_ensure_vm_job(username, workspace_name, job_id, create_vm))
 
         return {"status": "success", "message": "VM ensure job created", "job_id": job_id}
     except Exception as e:
         logger.error(f"Error creating ensure VM job: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def run_ensure_vm_job(username: str, workspace_name: str, job_id: str):
+async def run_ensure_vm_job(username: str, workspace_name: str, job_id: str, create: bool = True):
     """Background task to run ensure_vm and update job status"""
     try:
         # Update job status to running
@@ -48,7 +56,7 @@ async def run_ensure_vm_job(username: str, workspace_name: str, job_id: str):
 
         manager = SpotVMManager()
         # Use the async allocation method directly
-        result = await manager.allocate_or_reuse_vm(user_id=username, workspace_id=workspace_name)
+        result = await manager.allocate_or_reuse_vm(user_id=username, workspace_id=workspace_name, force_recreate=create)
 
         # Update job as completed with VM result
         await JobRepository.update_job_status(job_id, "completed", metadata={"output": result.model_dump_json()})
