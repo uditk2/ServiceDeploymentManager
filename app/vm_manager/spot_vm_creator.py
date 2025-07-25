@@ -279,6 +279,28 @@ class SpotVMCreator:
             logger.error(f"Error stopping VM {vm_name}: {str(e)}")
             return False
 
+    def run_vm_command(self, vm_name: str, command: str) -> Optional[str]:
+        """
+        Run a command on the VM using Azure Run Command
+        """
+        try:
+            logger.info(f"Running command on VM {vm_name}: {command}")
+            run_command_result = self.compute_client.virtual_machines.begin_run_command(
+                self.resource_group, vm_name, {
+                    'command_id': 'RunShellScript',
+                    'script': [command]
+                }
+            ).result()
+            
+            if run_command_result.value and run_command_result.value[0].message:
+                return run_command_result.value[0].message
+            else:
+                logger.warning(f"No output from command on VM {vm_name}")
+                return None
+        except Exception as e:
+            logger.error(f"Error running command on VM {vm_name}: {str(e)}")
+            return None
+        
     def _wait_for_vm_running(self, vm_name: str, timeout: int = 300):
         """Wait for VM to be in running state"""
         start_time = time.time()

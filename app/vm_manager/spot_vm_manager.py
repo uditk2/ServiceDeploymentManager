@@ -374,3 +374,38 @@ class SpotVMManager:
                 logger.warning(f"Docker cleanup completed with warnings for {context_description.lower()} {vm_name}: {cleanup_result.error}")
         except Exception as cleanup_error:
             logger.warning(f"Docker cleanup failed for {context_description.lower()} {vm_name}, but continuing: {str(cleanup_error)}")
+    
+    async def is_vm_docker_ready(self, user_id: str, workspace_id: str) -> bool:
+        """Check if VM is ready and cloud-init has finished"""
+        vm_name = self.get_user_vm_name(user_id, workspace_id)
+        try:
+            # Ensure VM exists and is running
+            if not self.vm_creator.vm_exists(vm_name):
+                logger.warning(f"VM {vm_name} does not exist for user {user_id}")
+                return False
+            if not self.is_vm_running(vm_name):
+                logger.warning(f"VM {vm_name} is not running, status: {self.vm_creator.get_vm_status(vm_name)}")
+                return False
+            
+            # First check: cloud-init status - ensure system initialization is complete
+            cloud_init_status = self.vm_creator.run_vm_command(vm_name, "cloud-init status")
+            logger.info(f"Cloud-init status for {vm_name}: {cloud_init_status}")
+            
+            if not cloud_init_status or "status: done" not in cloud_init_status:
+                logger.warning(f"VM {vm_name} cloud-init not finished yet")
+                return False
+            
+            # Second check: verify Docker was installed successfully
+            docker_version = self.vm_creator.run_vm_command(vm_name, "docker --version")
+            logger.info(f"Docker version check for {vm_name}: {docker_version}")
+            
+            if docker_version and "Docker version" in docker_version:
+                logger.info(f"VM {vm_name} is ready - cloud-init finished and Docker installed")
+                return True
+            else:
+                logger.warning(f"VM {vm_name} cloud-init done but Docker not accessible")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error checking VM readiness for {vm_name}: {str(e)}")
+            return False
