@@ -96,9 +96,9 @@ class SpotVMManager:
                 # Update workspace with current VM details
                 if workspace_id:
                     await self.vm_creator.update_workspace_table(user_id, workspace_id, existing_vm)
-                
-                # Perform comprehensive Docker cleanup on the running VM
-                await self._perform_vm_docker_cleanup(user_id, workspace_id, vm_name, "running VM")
+                if force_recreate == False:
+                    # Perform comprehensive Docker cleanup on the running VM to ensure it's ready for use
+                    await self._perform_vm_docker_cleanup(user_id, workspace_id, vm_name, "running VM")
                 
                 return VMInfoResult(
                     ip=existing_vm.private_ip,
