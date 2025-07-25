@@ -211,7 +211,7 @@ class DockerComposeRemoteVMUtils:
         Returns:
             The full Docker Compose build command as a string
         """
-        command_parts = ["docker"]
+        command_parts = ["DOCKER_BUILDKIT=0 docker"]
         if context_name:
             command_parts.extend(["--context", context_name])
         command_parts.append("compose")
